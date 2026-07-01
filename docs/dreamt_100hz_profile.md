@@ -113,4 +113,14 @@ Colab에서 전체 파일 또는 더 긴 구간을 스캔해 stage 값의 종류
   --max-rows 2000000
 ```
 
+생성된 JSON이 너무 길면 아래 명령으로 요약합니다.
+
+```python
+!PYTHONPATH=src python -m sse_sleep.summarize_stage_probe \
+  --input "/content/drive/MyDrive/dreamt_stage_probe.json" \
+  --out "/content/drive/MyDrive/dreamt_stage_probe_summary.txt"
+```
+
+출력에서 `total_stage_counts`, 파일별 `stage_counts`, `first_seen`, `transitions`만 공유하면 됩니다.
+
 결과에 따라 `labels.py`의 alias 또는 ignore label 정책을 확정합니다.

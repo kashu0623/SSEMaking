@@ -29,6 +29,13 @@ PYTHONPATH=src python -m sse_sleep.inspect_dreamt \
   --out "/content/drive/MyDrive/dreamt_schema.json"
 ```
 
+Stage probe JSON 요약:
+
+```bash
+PYTHONPATH=src python -m sse_sleep.summarize_stage_probe \
+  --input "/content/drive/MyDrive/dreamt_stage_probe.json"
+```
+
 그 다음 [docs/dreamt_pipeline_design.md](/Users/chan/Documents/SSE/docs/dreamt_pipeline_design.md)의 컬럼 매핑 기준에 따라 실제 파일 구조에 맞는 loader를 확정합니다.
 
 예시:
