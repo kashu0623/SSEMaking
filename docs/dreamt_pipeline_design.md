@@ -2,11 +2,11 @@
 
 ## 현재 확인 상태
 
-작업 폴더(`/Users/chan/Documents/SSE`)에는 아직 DreamT 데이터 파일이 없습니다. 따라서 로컬 원본 컬럼은 확정하지 못했습니다.
+작업 폴더(`/Users/chan/Documents/SSE`)에는 DreamT 원본을 로컬에 두지 않습니다. 원본은 Google Drive의 `/content/drive/MyDrive/data_100Hz`에서 Colab으로 읽습니다.
 
-웹에서 확인되는 공개 정보 기준으로는 DREAMT가 임상 PSG 기반 100명 규모, 7개 PSG channel을 포함하는 수면 단계 데이터셋으로 언급됩니다. 다만 실제 배포 파일의 컬럼명, sampling rate, annotation 포맷은 로컬 원본을 열어 확정해야 합니다.
+Colab inspection 결과 `data_100Hz`는 100개 CSV 파일로 구성되어 있고, 각 파일은 subject별 100Hz 통합 테이블입니다. 확인된 자세한 구조는 [dreamt_100hz_profile.md](/Users/chan/Documents/SSE/docs/dreamt_100hz_profile.md)에 정리했습니다.
 
-이 저장소의 첫 단계는 `inspect_dreamt`로 실제 파일 구조를 요약하고, 그 결과를 바탕으로 `column_map`을 고정하는 것입니다.
+고정 매핑은 [dreamt_100hz_column_map.json](/Users/chan/Documents/SSE/configs/dreamt_100hz_column_map.json)을 기준으로 합니다.
 
 ## 앱 입력과 feature provenance
 
@@ -31,9 +31,11 @@
 
 DreamT에 PPG, ACC, TEMP가 있으면 앱과 같은 입력군으로 맞춥니다.
 
-- PPG: IR/RED가 모두 있으면 각각 사용하고, 하나만 있으면 단일 PPG 경로로 처리
+- PPG: `data_100Hz`에는 `IR_PPG`/`RED_PPG` raw가 없고 `BVP`, `HR`, `IBI`, `SAO2`가 있음
 - ACC: 3축이 있으면 vector magnitude와 움직임 feature 생성
 - TEMP: 저주파 추세와 안정도 feature 생성
+
+따라서 `data_100Hz` 1차 앱 후보 모델에서는 `BVP`, `HR`, `IBI`를 PPG-derived proxy로 사용합니다. 실제 앱에서는 `IR_PPG`/`RED_PPG` raw에서 동일 계열 feature를 계산해야 하므로 train-serving 차이를 별도 검증합니다.
 
 DreamT에 ECG, EEG, EOG, EMG, airflow, SpO2 등이 있으면 기본 앱 모델 입력에서는 제외합니다. 단, 다음 용도는 허용합니다.
 

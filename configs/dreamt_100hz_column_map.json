@@ -1,0 +1,91 @@
+{
+  "description": "Confirmed mapping for /content/drive/MyDrive/data_100Hz DreamT CSV files.",
+  "file_pattern": "S*_PSG_df_updated.csv",
+  "subject_id_from_filename_regex": "^(S[0-9]+)_PSG_df_updated\\.csv$",
+  "sampling_rate_hz": 100,
+  "epoch_duration_seconds": 30,
+  "rows_per_epoch": 3000,
+  "timestamp_column": "TIMESTAMP",
+  "label_column": "Sleep_Stage",
+  "app_raw_columns_available_in_dreamt": {
+    "ACC_X": "ACC_X",
+    "ACC_Y": "ACC_Y",
+    "ACC_Z": "ACC_Z",
+    "TEMP": "TEMP"
+  },
+  "app_proxy_or_derived_columns_available_in_dreamt": {
+    "BVP": "BVP",
+    "HR": "HR",
+    "IBI": "IBI",
+    "SPO2": "SAO2"
+  },
+  "target_app_raw_columns_missing_in_dreamt": {
+    "IR_PPG": null,
+    "RED_PPG": null
+  },
+  "dreamt_only_psg_columns": [
+    "C4-M1",
+    "F4-M1",
+    "O2-M1",
+    "Fp1-O2",
+    "T3 - CZ",
+    "CZ - T4",
+    "CHIN",
+    "E1",
+    "E2",
+    "ECG",
+    "LAT",
+    "RAT",
+    "SNORE",
+    "PTAF",
+    "FLOW",
+    "THORAX",
+    "ABDOMEN",
+    "EDA"
+  ],
+  "respiratory_event_columns": [
+    "Obstructive_Apnea",
+    "Central_Apnea",
+    "Hypopnea",
+    "Multiple_Events"
+  ],
+  "default_model_input_policy": {
+    "include": [
+      "BVP",
+      "ACC_X",
+      "ACC_Y",
+      "ACC_Z",
+      "TEMP",
+      "HR",
+      "IBI"
+    ],
+    "optional_include_after_calibration_check": [
+      "SAO2"
+    ],
+    "exclude_from_app_serving_model": [
+      "C4-M1",
+      "F4-M1",
+      "O2-M1",
+      "Fp1-O2",
+      "T3 - CZ",
+      "CZ - T4",
+      "CHIN",
+      "E1",
+      "E2",
+      "ECG",
+      "LAT",
+      "RAT",
+      "SNORE",
+      "PTAF",
+      "FLOW",
+      "THORAX",
+      "ABDOMEN",
+      "EDA",
+      "Obstructive_Apnea",
+      "Central_Apnea",
+      "Hypopnea",
+      "Multiple_Events"
+    ]
+  }
+}
+
