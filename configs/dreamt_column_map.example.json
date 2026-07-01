@@ -1,0 +1,36 @@
+{
+  "description": "Copy this file to configs/dreamt_column_map.json after running inspect_dreamt.",
+  "subject_id": "subject_id",
+  "session_id": "session_id",
+  "timestamp": "timestamp",
+  "sample_index": null,
+  "sampling_rate_hz": {
+    "IR_PPG": null,
+    "RED_PPG": null,
+    "ACC_X": null,
+    "ACC_Y": null,
+    "ACC_Z": null,
+    "TEMP": null
+  },
+  "signals": {
+    "IR_PPG": null,
+    "RED_PPG": null,
+    "ACC_X": null,
+    "ACC_Y": null,
+    "ACC_Z": null,
+    "TEMP": null
+  },
+  "labels": {
+    "stage_column": "stage",
+    "epoch_start_column": "epoch_start",
+    "epoch_duration_seconds": 30
+  },
+  "exclude_signals_from_app_model": [
+    "EEG",
+    "EOG",
+    "EMG",
+    "ECG",
+    "SPO2"
+  ]
+}
+

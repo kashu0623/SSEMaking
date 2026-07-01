@@ -1,0 +1,12 @@
+# Local datasets and generated reports
+data/
+reports/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
+
