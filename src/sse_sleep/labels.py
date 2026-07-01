@@ -11,6 +11,7 @@ STAGE4_NAMES = ("Wake", "Light", "Deep", "REM")
 
 STAGE5_TO_ID = {name: idx for idx, name in enumerate(STAGE5_NAMES)}
 STAGE4_TO_ID = {name: idx for idx, name in enumerate(STAGE4_NAMES)}
+IGNORE_LABELS = {"", "?", "unknown", "artifact", "movement", "mt", "p"}
 
 _ALIASES = {
     "Wake": {"w", "wake", "awake", "stage w", "0"},
@@ -47,6 +48,8 @@ def normalize_label(raw_label: object) -> str:
 def canonical_stage(raw_label: object) -> str | None:
     """Map a raw DreamT/PSG label to Wake/N1/N2/N3/REM, or None if ignored."""
     normalized = normalize_label(raw_label)
+    if normalized in IGNORE_LABELS:
+        return None
     for stage, aliases in _ALIASES.items():
         if normalized in aliases:
             return stage
@@ -74,4 +77,3 @@ def merge_5_to_4(class_id_5: int) -> int:
 def merge_many_5_to_4(labels_5: Iterable[int]) -> list[int]:
     """Merge an iterable of 5-class ids into 4-class ids."""
     return [merge_5_to_4(label) for label in labels_5]
-

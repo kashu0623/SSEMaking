@@ -89,32 +89,28 @@ PSG-rich upper-bound model:
 
 ## 아직 확인해야 할 것
 
-`Sleep_Stage` 컬럼의 실제 값이 첫 1,000 row sample에서는 stage alias로 감지되지 않았습니다. 시작 구간이 비어 있거나 stage encoding이 다른 숫자/문자일 수 있습니다.
+`Sleep_Stage` 컬럼의 실제 값이 첫 1,000 row sample에서는 stage alias로 감지되지 않았습니다. 추가로 처음 500,000 rows를 확인했을 때 `S002`, `S003`, `S004` 모두 `P`만 나왔습니다.
 
-Colab에서 아래 요약을 한 번 더 실행해 stage encoding을 확인합니다.
+100Hz에서 500,000 rows는 약 83분입니다. 이 구간이 모두 `P`라면 `P`는 5-class 수면 단계가 아니라 pre-recording, placeholder, preparation period 같은 별도 marker일 가능성이 있습니다. 의미가 확정되기 전까지 `P`를 Wake/N1/N2/N3/REM 중 하나로 매핑하지 않습니다.
+
+Colab에서 전체 파일 또는 더 긴 구간을 스캔해 stage 값의 종류와 전환 시점을 확인합니다.
 
 ```python
-import csv
-from collections import Counter
-from pathlib import Path
-
-root = Path("/content/drive/MyDrive/data_100Hz")
-files = sorted(root.glob("S*_PSG_df_updated.csv"))[:3]
-
-for path in files:
-    counts = Counter()
-    rows = 0
-    with path.open("r", encoding="utf-8", errors="replace", newline="") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            value = (row.get("Sleep_Stage") or "").strip()
-            if value:
-                counts[value] += 1
-            rows += 1
-            if rows >= 500000:
-                break
-    print(path.name, "rows_checked=", rows, counts.most_common(20))
+%cd /content/SSE
+!git pull
+!PYTHONPATH=src python -m sse_sleep.probe_stage_values \
+  --root "/content/drive/MyDrive/data_100Hz" \
+  --limit-files 3 \
+  --out "/content/drive/MyDrive/dreamt_stage_probe.json"
 ```
 
-결과에 따라 `labels.py`의 alias 또는 label map을 확정합니다.
+빠른 확인만 하고 싶으면 `--max-rows`를 둡니다.
 
+```python
+!PYTHONPATH=src python -m sse_sleep.probe_stage_values \
+  --root "/content/drive/MyDrive/data_100Hz" \
+  --limit-files 3 \
+  --max-rows 2000000
+```
+
+결과에 따라 `labels.py`의 alias 또는 ignore label 정책을 확정합니다.
