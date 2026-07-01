@@ -87,13 +87,51 @@ PSG-rich upper-bound model:
 
 이 모델은 앱 탑재용이 아니라 성능 상한 비교용입니다.
 
-## 아직 확인해야 할 것
+## Sleep_Stage 확인 결과
 
-`Sleep_Stage` 컬럼의 실제 값이 첫 1,000 row sample에서는 stage alias로 감지되지 않았습니다. 추가로 처음 500,000 rows를 확인했을 때 `S002`, `S003`, `S004` 모두 `P`만 나왔습니다.
+Stage probe 결과 `Sleep_Stage`는 row-level로 저장되어 있지만 실제로는 30초 epoch label이 100Hz row마다 반복된 형태입니다.
 
-100Hz에서 500,000 rows는 약 83분입니다. 이 구간이 모두 `P`라면 `P`는 5-class 수면 단계가 아니라 pre-recording, placeholder, preparation period 같은 별도 marker일 가능성이 있습니다. 의미가 확정되기 전까지 `P`를 Wake/N1/N2/N3/REM 중 하나로 매핑하지 않습니다.
+확인된 raw label:
 
-Colab에서 전체 파일 또는 더 긴 구간을 스캔해 stage 값의 종류와 전환 시점을 확인합니다.
+- `P`: ignore. 파일 앞부분의 pre-recording/placeholder 구간으로 보고 학습에서 제외
+- `W`: Wake
+- `N1`: N1
+- `N2`: N2
+- `N3`: N3
+- `R`: REM
+
+첫 3개 파일 합산:
+
+- `N2`: 3,558,000 rows
+- `P`: 2,225,909 rows
+- `W`: 1,880,991 rows
+- `N1`: 777,000 rows
+- `R`: 597,000 rows
+- `N3`: 411,000 rows
+
+`P` 이후 첫 실제 label 전환:
+
+- `S002`: row 917,403, epoch 305, `P -> W`
+- `S003`: row 719,403, epoch 239, `P -> W`
+- `S004`: row 589,103, epoch 196, `P -> W`
+
+주의할 점은 첫 `P -> W` 전환이 항상 3,000-row 경계에 맞지 않는다는 것입니다. 또한 subject마다 이후 label boundary의 row offset도 다를 수 있습니다. 따라서 loader는 파일 row 0부터 무조건 3,000행씩 자르면 안 됩니다.
+
+권장 epoching 정책:
+
+1. `Sleep_Stage` run-length를 먼저 만든다.
+2. raw label `P` run은 버린다.
+3. `W/N1/N2/N3/R` run 중 길이가 3,000 rows인 full run을 하나의 30초 epoch로 사용한다.
+4. 길이가 3,000 rows보다 짧은 partial run은 기본적으로 제외한다.
+5. 길이가 3,000 rows의 배수인 run은 3,000 rows씩 나눠 같은 label epoch로 사용한다.
+
+이 정책을 쓰면 subject별 stage boundary offset이 달라도 label과 feature window가 어긋나는 문제를 피할 수 있습니다.
+
+## Stage probe 재실행 방법
+
+필요하면 Colab에서 전체 파일 또는 더 긴 구간을 스캔해 stage 값의 종류와 전환 시점을 다시 확인합니다.
+
+Colab 명령:
 
 ```python
 %cd /content/SSE
@@ -122,5 +160,3 @@ Colab에서 전체 파일 또는 더 긴 구간을 스캔해 stage 값의 종류
 ```
 
 출력에서 `total_stage_counts`, 파일별 `stage_counts`, `first_seen`, `transitions`만 공유하면 됩니다.
-
-결과에 따라 `labels.py`의 alias 또는 ignore label 정책을 확정합니다.

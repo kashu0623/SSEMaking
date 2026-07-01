@@ -7,6 +7,23 @@
   "rows_per_epoch": 3000,
   "timestamp_column": "TIMESTAMP",
   "label_column": "Sleep_Stage",
+  "raw_stage_values": {
+    "W": "Wake",
+    "N1": "N1",
+    "N2": "N2",
+    "N3": "N3",
+    "R": "REM",
+    "P": "ignore_pre_recording_or_placeholder"
+  },
+  "epoch_alignment_policy": {
+    "do_not_start_at_file_row_zero": true,
+    "build_epochs_from_sleep_stage_runs": true,
+    "drop_raw_stage_values": [
+      "P"
+    ],
+    "drop_partial_label_runs": true,
+    "expected_rows_per_full_epoch": 3000
+  },
   "app_raw_columns_available_in_dreamt": {
     "ACC_X": "ACC_X",
     "ACC_Y": "ACC_Y",
@@ -88,4 +105,3 @@
     ]
   }
 }
-

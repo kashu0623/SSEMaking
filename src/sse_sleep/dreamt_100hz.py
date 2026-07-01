@@ -14,6 +14,14 @@ FILENAME_RE = re.compile(r"^(S[0-9]+)_PSG_df_updated\.csv$")
 
 TIMESTAMP_COLUMN = "TIMESTAMP"
 LABEL_COLUMN = "Sleep_Stage"
+RAW_STAGE_IGNORE_VALUES = ("P",)
+RAW_STAGE_TO_CANONICAL = {
+    "W": "Wake",
+    "N1": "N1",
+    "N2": "N2",
+    "N3": "N3",
+    "R": "REM",
+}
 
 APP_RAW_COLUMNS = ("ACC_X", "ACC_Y", "ACC_Z", "TEMP")
 APP_PROXY_DERIVED_COLUMNS = ("BVP", "HR", "IBI")
@@ -60,3 +68,9 @@ def rows_to_epoch_index(row_index_zero_based: int) -> int:
         raise ValueError("row_index_zero_based must be non-negative")
     return row_index_zero_based // ROWS_PER_EPOCH
 
+
+def row_mod_epoch(row_index_zero_based: int) -> int:
+    """Return row offset within a nominal 30-second 100Hz epoch."""
+    if row_index_zero_based < 0:
+        raise ValueError("row_index_zero_based must be non-negative")
+    return row_index_zero_based % ROWS_PER_EPOCH
