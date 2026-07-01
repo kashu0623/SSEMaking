@@ -2,6 +2,9 @@
 data/
 reports/
 
+# Accidental nested clone
+SSE/
+
 # Python cache
 __pycache__/
 *.py[cod]
@@ -9,4 +12,3 @@ __pycache__/
 # Virtual environments
 .venv/
 venv/
-

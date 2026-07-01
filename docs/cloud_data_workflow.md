@@ -65,6 +65,44 @@ PYTHONPATH=src python -m sse_sleep.inspect_dreamt \
   --include-copy-files
 ```
 
+## Colab 오류 대응
+
+### `Transport endpoint is not connected`
+
+Google Drive mount가 끊겼을 때 나는 오류입니다. 런타임에서 Drive를 다시 mount한 뒤 재실행합니다.
+
+```python
+from google.colab import drive
+drive.flush_and_unmount()
+drive.mount("/content/drive", force_remount=True)
+```
+
+경로가 다시 보이는지 확인합니다.
+
+```python
+!ls "/content/drive/MyDrive/data_100Hz" | head
+```
+
+그 다음 inspection을 다시 실행합니다.
+
+```python
+!PYTHONPATH=src python -m sse_sleep.inspect_dreamt \
+  --root "/content/drive/MyDrive/data_100Hz" \
+  --out "/content/drive/MyDrive/dreamt_schema.json"
+```
+
+최신 코드에서는 일부 파일만 일시적으로 접근 불가한 경우 전체 실행을 중단하지 않고 `inaccessible_files`에 기록합니다. `inaccessible_file_count`가 0이 아니면 Drive remount 후 다시 실행하는 편이 좋습니다.
+
+### Colab 셀에서 `SyntaxError: invalid syntax`
+
+`git clone`, `pip install`, `PYTHONPATH=...` 같은 명령은 Python 문법이 아니라 shell 명령입니다. Colab/Jupyter 셀에서는 앞에 `!`를 붙입니다.
+
+```python
+!git clone https://github.com/kashu0623/SSEMaking.git SSE
+%cd SSE
+!pip install -r requirements.txt
+```
+
 ## 대안 1: Google Drive Desktop 스트리밍
 
 Google Drive Desktop의 “스트리밍” 모드는 파일을 전부 로컬에 내려받지 않고 필요할 때 읽습니다.

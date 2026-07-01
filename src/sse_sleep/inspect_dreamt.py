@@ -47,7 +47,7 @@ class ColumnSummary:
 class FileSummary:
     path: str
     extension: str
-    size_bytes: int
+    size_bytes: int | None
     kind: str
     delimiter: str | None = None
     columns: list[ColumnSummary] | None = None
@@ -98,6 +98,14 @@ def duplicate_group_key(root: Path, path: Path) -> tuple[str, str, str]:
     """Group original/copy files by relative parent, normalized stem, and extension."""
     relative_parent = str(path.parent.relative_to(root))
     return (relative_parent, copy_normalized_stem(path.stem).lower(), path.suffix.lower())
+
+
+def safe_stat_size(path: Path) -> int | None:
+    """Return file size, or None when cloud storage temporarily disconnects."""
+    try:
+        return path.stat().st_size
+    except OSError:
+        return None
 
 
 def sniff_delimiter(path: Path) -> str:
@@ -151,7 +159,7 @@ def inspect_text_table(path: Path, sample_rows: int) -> FileSummary:
     return FileSummary(
         path=str(path),
         extension=path.suffix.lower(),
-        size_bytes=path.stat().st_size,
+        size_bytes=safe_stat_size(path),
         kind="text_table",
         delimiter=delimiter,
         columns=columns,
@@ -160,11 +168,15 @@ def inspect_text_table(path: Path, sample_rows: int) -> FileSummary:
 
 
 def all_data_files(root: Path) -> list[Path]:
-    return [
-        path
-        for path in sorted(root.rglob("*"))
-        if path.is_file() and path.suffix.lower() in KNOWN_DATA_EXTENSIONS
-    ]
+    files: list[Path] = []
+    for path in sorted(root.rglob("*")):
+        try:
+            is_file = path.is_file()
+        except OSError:
+            continue
+        if is_file and path.suffix.lower() in KNOWN_DATA_EXTENSIONS:
+            files.append(path)
+    return files
 
 
 def select_data_files(root: Path, include_copy_files: bool) -> tuple[list[Path], list[Path]]:
@@ -191,12 +203,21 @@ def select_data_files(root: Path, include_copy_files: bool) -> tuple[list[Path],
 
 def inspect_file(path: Path, sample_rows: int) -> FileSummary:
     extension = path.suffix.lower()
-    if extension in TEXT_EXTENSIONS:
-        return inspect_text_table(path, sample_rows)
+    try:
+        if extension in TEXT_EXTENSIONS:
+            return inspect_text_table(path, sample_rows)
+    except OSError as error:
+        return FileSummary(
+            path=str(path),
+            extension=extension,
+            size_bytes=safe_stat_size(path),
+            kind="inaccessible",
+            note=f"{type(error).__name__}: {error}",
+        )
     return FileSummary(
         path=str(path),
         extension=extension,
-        size_bytes=path.stat().st_size,
+        size_bytes=safe_stat_size(path),
         kind="binary_or_columnar",
         note="Install/read with format-specific loader to inspect channels and sampling rates.",
     )
@@ -205,11 +226,14 @@ def inspect_file(path: Path, sample_rows: int) -> FileSummary:
 def inspect_root(root: Path, sample_rows: int, include_copy_files: bool = False) -> dict[str, object]:
     selected_files, skipped_copy_files = select_data_files(root, include_copy_files)
     files = [inspect_file(path, sample_rows) for path in selected_files]
+    inaccessible_files = [file_summary for file_summary in files if file_summary.kind == "inaccessible"]
     return {
         "root": str(root),
         "include_copy_files": include_copy_files,
         "skipped_copy_file_count": len(skipped_copy_files),
         "skipped_copy_files": [str(path) for path in skipped_copy_files],
+        "inaccessible_file_count": len(inaccessible_files),
+        "inaccessible_files": [asdict(file_summary) for file_summary in inaccessible_files],
         "file_count": len(files),
         "files": [asdict(file_summary) for file_summary in files],
         "feature_catalog": feature_catalog_dicts(),
