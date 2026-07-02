@@ -51,6 +51,16 @@ PYTHONPATH=src python -m sse_sleep.preprocess_dreamt_100hz \
 - `/content/drive/MyDrive/SSE_outputs/dreamt_100hz_epoch_features.csv`
 - `/content/drive/MyDrive/SSE_outputs/dreamt_100hz_preprocess_summary.json`
 
+학습용 NPZ 생성:
+
+```bash
+PYTHONPATH=src python -m sse_sleep.build_npz_dataset \
+  --input-csv "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_epoch_features.csv" \
+  --out "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_lstm_context10.npz" \
+  --summary-out "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_lstm_context10_summary.json" \
+  --context-epochs 10
+```
+
 그 다음 [docs/dreamt_pipeline_design.md](/Users/chan/Documents/SSE/docs/dreamt_pipeline_design.md)의 컬럼 매핑 기준에 따라 실제 파일 구조에 맞는 loader를 확정합니다.
 
 예시:

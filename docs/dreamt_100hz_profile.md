@@ -201,3 +201,39 @@ Colab 명령:
 - `IBI`
 
 `SAO2`를 ablation에 포함하려면 `--include-sao2`를 추가합니다.
+
+## 학습용 NPZ 생성
+
+전처리가 완료되면 epoch feature CSV를 subject-wise train/validation/test split으로 나누고, causal sequence window를 만들어 `.npz`로 저장합니다.
+
+기본 설정:
+
+- subject-wise split: train 70%, validation 15%, test 15%
+- context: 과거 10개 epoch, 즉 5분
+- target: context의 마지막/latest epoch label
+- normalization: train split mean/std로 모든 split 표준화
+- non-contiguous epoch gap이 있는 sequence는 제외
+
+Colab 명령:
+
+```python
+!PYTHONPATH=src python -m sse_sleep.build_npz_dataset \
+  --input-csv "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_epoch_features.csv" \
+  --out "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_lstm_context10.npz" \
+  --summary-out "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_lstm_context10_summary.json" \
+  --context-epochs 10
+```
+
+출력:
+
+- `dreamt_100hz_lstm_context10.npz`
+- `dreamt_100hz_lstm_context10_summary.json`
+
+NPZ 주요 배열:
+
+- `X_train`, `y_train`
+- `X_val`, `y_val`
+- `X_test`, `y_test`
+- `feature_names`
+- `stage5_names`
+- `train_feature_mean`, `train_feature_std`
