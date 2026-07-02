@@ -36,6 +36,21 @@ PYTHONPATH=src python -m sse_sleep.summarize_stage_probe \
   --input "/content/drive/MyDrive/dreamt_stage_probe.json"
 ```
 
+DreamT 100Hz 전처리 smoke test:
+
+```bash
+PYTHONPATH=src python -m sse_sleep.preprocess_dreamt_100hz \
+  --root "/content/drive/MyDrive/data_100Hz" \
+  --out-dir "/content/drive/MyDrive/SSE_outputs" \
+  --limit-files 1 \
+  --max-rows 1200000
+```
+
+출력:
+
+- `/content/drive/MyDrive/SSE_outputs/dreamt_100hz_epoch_features.csv`
+- `/content/drive/MyDrive/SSE_outputs/dreamt_100hz_preprocess_summary.json`
+
 그 다음 [docs/dreamt_pipeline_design.md](/Users/chan/Documents/SSE/docs/dreamt_pipeline_design.md)의 컬럼 매핑 기준에 따라 실제 파일 구조에 맞는 loader를 확정합니다.
 
 예시:

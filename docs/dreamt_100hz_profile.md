@@ -160,3 +160,44 @@ Colab 명령:
 ```
 
 출력에서 `total_stage_counts`, 파일별 `stage_counts`, `first_seen`, `transitions`만 공유하면 됩니다.
+
+## 전처리 실행
+
+대용량 CSV를 통째로 메모리에 올리지 않고 streaming 방식으로 30초 epoch feature CSV를 생성합니다.
+
+먼저 1개 파일 일부 row로 smoke test를 실행합니다.
+
+```python
+%cd /content/SSE
+!git pull
+!PYTHONPATH=src python -m sse_sleep.preprocess_dreamt_100hz \
+  --root "/content/drive/MyDrive/data_100Hz" \
+  --out-dir "/content/drive/MyDrive/SSE_outputs" \
+  --limit-files 1 \
+  --max-rows 1200000
+```
+
+문제가 없으면 전체 파일을 처리합니다.
+
+```python
+!PYTHONPATH=src python -m sse_sleep.preprocess_dreamt_100hz \
+  --root "/content/drive/MyDrive/data_100Hz" \
+  --out-dir "/content/drive/MyDrive/SSE_outputs"
+```
+
+출력 파일:
+
+- `dreamt_100hz_epoch_features.csv`: 모델 학습용 epoch feature table
+- `dreamt_100hz_preprocess_summary.json`: subject별 alignment offset, skip count, label count 요약
+
+기본 입력 feature:
+
+- `BVP`
+- `ACC_X`
+- `ACC_Y`
+- `ACC_Z`
+- `TEMP`
+- `HR`
+- `IBI`
+
+`SAO2`를 ablation에 포함하려면 `--include-sao2`를 추가합니다.
