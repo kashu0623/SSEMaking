@@ -66,8 +66,15 @@ def make_loader(x: np.ndarray, y: np.ndarray, batch_size: int, shuffle: bool) ->
     return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, drop_last=False)
 
 
-def class_weights(y_train: np.ndarray, num_classes: int, mode: str) -> torch.Tensor | None:
+def class_weights(
+    y_train: np.ndarray,
+    num_classes: int,
+    mode: str,
+    n3_weight_multiplier: float = 1.0,
+) -> torch.Tensor | None:
     """Return class weights for cross entropy, or None for unweighted loss."""
+    if n3_weight_multiplier <= 0:
+        raise ValueError(f"n3_weight_multiplier must be positive: {n3_weight_multiplier}")
     if mode == "none":
         return None
     counts = np.bincount(y_train.astype(np.int64), minlength=num_classes).astype(np.float32)
@@ -77,6 +84,10 @@ def class_weights(y_train: np.ndarray, num_classes: int, mode: str) -> torch.Ten
     elif mode != "inverse":
         raise ValueError(f"Unknown class_weight_mode: {mode}")
     weights = weights / weights.mean()
+    if n3_weight_multiplier != 1.0:
+        n3_index = STAGE5_NAMES.index("N3")
+        weights[n3_index] *= n3_weight_multiplier
+        weights = weights / weights.mean()
     return torch.tensor(weights, dtype=torch.float32)
 
 
@@ -154,6 +165,7 @@ def train_lstm(
     patience: int,
     seed: int,
     class_weight_mode: str,
+    n3_weight_multiplier: float,
 ) -> dict[str, Any]:
     set_seed(seed)
     arrays = load_npz(npz_path)
@@ -173,7 +185,12 @@ def train_lstm(
         dropout=dropout,
     ).to(device)
 
-    weights = class_weights(y_train, len(STAGE5_NAMES), mode=class_weight_mode)
+    weights = class_weights(
+        y_train,
+        len(STAGE5_NAMES),
+        mode=class_weight_mode,
+        n3_weight_multiplier=n3_weight_multiplier,
+    )
     weights_for_loss = weights.to(device) if weights is not None else None
     criterion = nn.CrossEntropyLoss(weight=weights_for_loss)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
@@ -227,6 +244,7 @@ def train_lstm(
                     "num_layers": num_layers,
                     "dropout": dropout,
                     "class_weight_mode": class_weight_mode,
+                    "n3_weight_multiplier": n3_weight_multiplier,
                     "feature_names": feature_names,
                     "stage5_names": STAGE5_NAMES,
                 },
@@ -259,6 +277,7 @@ def train_lstm(
             "weight_decay": weight_decay,
             "patience": patience,
             "class_weight_mode": class_weight_mode,
+            "n3_weight_multiplier": n3_weight_multiplier,
         },
         "array_shapes": {
             "X_train": list(x_train.shape),
@@ -268,6 +287,7 @@ def train_lstm(
         "feature_names": feature_names,
         "stage5_names": list(STAGE5_NAMES),
         "class_weight_mode": class_weight_mode,
+        "n3_weight_multiplier": n3_weight_multiplier,
         "class_weights": None if weights is None else weights.detach().cpu().numpy().tolist(),
         "best_epoch": best_epoch,
         "best_val_macro_f1": best_val_macro_f1,
@@ -313,6 +333,12 @@ def main() -> None:
         default="inverse",
         help="Class weighting for CrossEntropyLoss. inverse matches the original behavior.",
     )
+    parser.add_argument(
+        "--n3-weight-multiplier",
+        type=float,
+        default=1.0,
+        help="Additional multiplier for the N3 class weight after the selected class weighting mode.",
+    )
     args = parser.parse_args()
 
     report = train_lstm(
@@ -328,6 +354,7 @@ def main() -> None:
         patience=args.patience,
         seed=args.seed,
         class_weight_mode=args.class_weight_mode,
+        n3_weight_multiplier=args.n3_weight_multiplier,
     )
     print(json.dumps({"best_epoch": report["best_epoch"], "final_test": report["final_test"]}, indent=2, ensure_ascii=False))
 

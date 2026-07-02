@@ -99,6 +99,18 @@ PYTHONPATH=src python -m sse_sleep.train_lstm \
   --class-weight-mode sqrt
 ```
 
+N3 보존 실험처럼 특정 Deep/N3 recall을 더 밀어보고 싶을 때는 inverse weight 위에 N3만 추가 배율을 줄 수 있습니다.
+
+```bash
+PYTHONPATH=src python -m sse_sleep.train_lstm \
+  --npz "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_temporal_lstm_context20.npz" \
+  --out-dir "/content/drive/MyDrive/SSE_outputs/lstm_temporal_context20_h64_inverse_n3x15" \
+  --hidden-size 64 \
+  --dropout 0.4 \
+  --class-weight-mode inverse \
+  --n3-weight-multiplier 1.5
+```
+
 그 다음 [docs/dreamt_pipeline_design.md](/Users/chan/Documents/SSE/docs/dreamt_pipeline_design.md)의 컬럼 매핑 기준에 따라 실제 파일 구조에 맞는 loader를 확정합니다.
 
 예시:

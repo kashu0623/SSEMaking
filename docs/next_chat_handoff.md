@@ -503,11 +503,69 @@ lstm_temporal_context20_h64_inverse
 
 ### 2. N3 보존 개선
 
-hidden128이 N3를 회복하지 못하면 다음 후보:
+hidden128 결과:
+
+```text
+lstm_temporal_context20_h128_inverse
+5-class Macro F1: 0.3192
+4-class Macro F1: 0.3861
+5-class Kappa:    0.1979
+4-class Kappa:    0.2193
+
+Wake F1: 0.479
+N1 F1:   0.166
+N2 F1:   0.518
+N3 F1:   0.085
+REM F1:  0.347
+```
+
+해석:
+
+- hidden128은 N3를 h64의 0.051 -> 0.085로 조금 회복했지만 여전히 낮다.
+- 대신 REM, 4-class Macro F1, Kappa가 모두 떨어졌다.
+- 따라서 현재 best는 계속 `lstm_temporal_context20_h64_inverse`.
+- 다음 실험은 hidden size 증가보다 N3 class weight 직접 강화가 우선이다.
+
+추가된 옵션:
+
+```text
+--n3-weight-multiplier
+```
+
+기본값은 `1.0`이며, 기존 결과 재현에는 영향이 없다. `inverse`/`sqrt` weight 계산 후 N3 weight만 지정 배율만큼 키우고 다시 평균 1로 normalize한다.
+
+바로 이어서 실행할 실험:
+
+```python
+!PYTHONPATH=src python -m sse_sleep.train_lstm \
+  --npz "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_temporal_lstm_context20.npz" \
+  --out-dir "/content/drive/MyDrive/SSE_outputs/lstm_temporal_context20_h64_inverse_n3x15" \
+  --hidden-size 64 \
+  --dropout 0.4 \
+  --class-weight-mode inverse \
+  --n3-weight-multiplier 1.5
+```
+
+```python
+!PYTHONPATH=src python -m sse_sleep.train_lstm \
+  --npz "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_temporal_lstm_context20.npz" \
+  --out-dir "/content/drive/MyDrive/SSE_outputs/lstm_temporal_context20_h64_inverse_n3x20" \
+  --hidden-size 64 \
+  --dropout 0.4 \
+  --class-weight-mode inverse \
+  --n3-weight-multiplier 2.0
+```
+
+판단 기준:
+
+- N3/Deep F1이 최소 0.12~0.15 이상 회복되는지 확인한다.
+- 동시에 REM F1과 4-class Macro F1/Kappa가 크게 무너지면 채택하지 않는다.
+- N3가 좋아져도 4-class Macro F1이 h64 best `0.4036`에서 너무 떨어지면 스마트 알람 관점의 overall best는 아니다.
+
+그 다음 후보:
 
 - temporal feature set 조정
 - N3에 도움이 될 수 있는 feature 추가/선별
-- N3 class weight만 약간 강화하는 custom weight mode
 - Deep/N3 binary auxiliary head 또는 multi-task 구조
 
 ### 3. 반복 split 확인
@@ -543,4 +601,3 @@ hidden128이 N3를 회복하지 못하면 다음 후보:
 docs/next_chat_handoff.md 내용을 읽고 이어서 진행해줘.
 우선 temporal context20 h128 inverse 실험 결과를 해석하거나, 아직 실행 전이면 실행 명령부터 안내해줘.
 ```
-
