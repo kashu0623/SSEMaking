@@ -237,3 +237,28 @@ NPZ 주요 배열:
 - `feature_names`
 - `stage5_names`
 - `train_feature_mean`, `train_feature_std`
+
+## LSTM 학습
+
+NPZ 생성이 완료되면 5-class LSTM classifier를 학습합니다.
+
+```python
+!PYTHONPATH=src python -m sse_sleep.train_lstm \
+  --npz "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_lstm_context10.npz" \
+  --out-dir "/content/drive/MyDrive/SSE_outputs/lstm_context10"
+```
+
+출력 파일:
+
+- `lstm_best.pt`: validation 5-class Macro F1 기준 best checkpoint
+- `lstm_metrics.json`: train/validation/test metric report
+- `lstm_predictions.npz`: validation/test prediction arrays
+
+`lstm_metrics.json`에는 다음 평가가 모두 포함됩니다.
+
+- 5-class Accuracy, Macro F1, Cohen's Kappa
+- 5-class confusion matrix
+- 5-class class-wise precision/recall/F1
+- 4-class 병합 Accuracy, Macro F1, Cohen's Kappa
+- 4-class confusion matrix
+- 4-class class-wise precision/recall/F1
