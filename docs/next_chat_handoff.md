@@ -1,0 +1,546 @@
+# SSE Sleep Stage Estimation 다음 채팅방 Handoff
+
+이 문서는 DreamT 기반 수면 단계 예측 모델 개발을 다음 채팅방에서 이어가기 위한 요약이다.
+
+## 프로젝트 목표
+
+자체 제작 웨어러블 기기에서 실시간으로 들어오는 raw sensor:
+
+- `IR PPG`
+- `RED PPG`
+- `ACC_X`
+- `ACC_Y`
+- `ACC_Z`
+- `TEMP`
+
+를 이용해 30초 epoch 단위 수면 단계를 추론하고, 스마트 알람 앱에서 깨우기 좋은 수면 단계에 알람을 울리는 알고리즘을 만드는 것이 목표다.
+
+모델은 5-class로 학습한다.
+
+- Wake
+- N1
+- N2
+- N3
+- REM
+
+평가는 5-class 원본 성능과 함께 4-class 병합 성능도 출력한다.
+
+- Wake = Wake
+- Light = N1 + N2
+- Deep = N3
+- REM = REM
+
+평가 지표는 Accuracy만 보지 않고 Macro F1, Cohen's Kappa, confusion matrix, class-wise precision/recall/F1을 본다.
+
+## 저장소와 실행 환경
+
+GitHub repo:
+
+```text
+https://github.com/kashu0623/SSEMaking.git
+```
+
+로컬 작업 폴더:
+
+```text
+/Users/chan/Documents/SSE
+```
+
+Colab 기준 데이터 경로:
+
+```text
+/content/drive/MyDrive/data_100Hz
+```
+
+Colab output 경로:
+
+```text
+/content/drive/MyDrive/SSE_outputs
+```
+
+현재 repo는 `main` branch에 push되어 있다. 마지막 주요 commit:
+
+```text
+0eb3516 Add temporal rolling feature builder
+```
+
+다음 채팅방 시작 시 Colab에서는 먼저:
+
+```python
+%cd /content/SSE
+!git pull
+```
+
+## DreamT 데이터 구조 확인 결과
+
+DreamT Drive 폴더:
+
+```text
+/content/drive/MyDrive/data_100Hz
+```
+
+구조:
+
+- CSV 100개
+- subject별 파일명: `S002_PSG_df_updated.csv`, `S003_PSG_df_updated.csv`, ...
+- 각 파일 약 1.4GB
+- 100Hz row-level CSV
+- 30초 epoch = 3000 rows
+
+확인된 주요 컬럼:
+
+- `TIMESTAMP`
+- PSG 계열: `C4-M1`, `F4-M1`, `O2-M1`, `Fp1-O2`, `T3 - CZ`, `CZ - T4`, `CHIN`, `E1`, `E2`, `ECG`, ...
+- 앱 후보/파생 feature 계열: `BVP`, `ACC_X`, `ACC_Y`, `ACC_Z`, `TEMP`, `HR`, `IBI`
+- optional: `SAO2`
+- label: `Sleep_Stage`
+
+중요한 설계 판단:
+
+- DreamT에는 앱 raw 입력인 `IR_PPG`, `RED_PPG`가 직접 없다.
+- 대신 `BVP`, `HR`, `IBI`, `SAO2`가 있다.
+- 1차 앱 후보 모델에서는 `BVP`, `ACC_X/Y/Z`, `TEMP`, `HR`, `IBI`를 사용한다.
+- `SAO2`는 device calibration 이슈 때문에 core feature가 아니라 optional ablation으로 둔다.
+- EEG/EOG/EMG/ECG/호흡/이벤트/EDA 계열은 앱 serving model 입력에서 제외한다.
+
+## Sleep_Stage 라벨 구조
+
+Stage probe 결과:
+
+- `P`: pre-recording/placeholder로 보고 학습 제외
+- `W`: Wake
+- `N1`: N1
+- `N2`: N2
+- `N3`: N3
+- `R`: REM
+
+중요:
+
+- 첫 `P -> W` 전환 row가 subject마다 3000-row boundary와 딱 맞지 않는다.
+- 따라서 file row 0부터 무조건 3000행씩 자르면 label window가 틀어질 수 있다.
+- preprocessing에서는 subject/file별 dominant stage-transition offset을 찾아 그 offset 기준의 3000-row window만 사용한다.
+- window 내부 label이 하나로 고정된 경우만 epoch로 저장한다.
+- `P` window와 mixed-label window는 제외한다.
+
+관련 파일:
+
+- `src/sse_sleep/probe_stage_values.py`
+- `src/sse_sleep/summarize_stage_probe.py`
+- `src/sse_sleep/preprocess_dreamt_100hz.py`
+- `configs/dreamt_100hz_column_map.json`
+- `docs/dreamt_100hz_profile.md`
+
+## 전처리 결과
+
+전체 100개 파일 전처리 완료.
+
+출력:
+
+```text
+/content/drive/MyDrive/SSE_outputs/dreamt_100hz_epoch_features.csv
+/content/drive/MyDrive/SSE_outputs/dreamt_100hz_preprocess_summary.json
+```
+
+전체 전처리 summary:
+
+```text
+files_processed: 100
+total_epochs_written: 79,865
+
+Wake: 20,034  25.08%
+N1:    8,806  11.03%
+N2:   39,938  50.01%
+N3:    2,703   3.38%
+REM:   8,384  10.50%
+```
+
+subject당 epoch 수:
+
+```text
+min: 623
+median: 806
+max: 954
+mean: 약 798.6
+```
+
+mixed label skip:
+
+```text
+total mixed skipped: 141
+total ignored P windows: 23,716
+partial total: 2
+```
+
+전처리 명령:
+
+```python
+!PYTHONPATH=src python -m sse_sleep.preprocess_dreamt_100hz \
+  --root "/content/drive/MyDrive/data_100Hz" \
+  --out-dir "/content/drive/MyDrive/SSE_outputs"
+```
+
+## NPZ 생성
+
+기본 epoch feature CSV에서 LSTM용 context10/20/30 NPZ를 만들었다.
+
+기본 context10 summary:
+
+```text
+subject_count: 100
+feature_count: 67
+
+X_train: [55133, 10, 67]
+X_val:   [11787, 10, 67]
+X_test:  [11844, 10, 67]
+
+subject-wise split:
+train 70명 / val 15명 / test 15명
+```
+
+context20:
+
+```text
+X_train: [54314, 20, 67]
+X_val:   [11602, 20, 67]
+X_test:  [11694, 20, 67]
+```
+
+context30:
+
+```text
+X_train: [53521, 30, 67]
+X_val:   [11422, 30, 67]
+X_test:  [11544, 30, 67]
+```
+
+NPZ 생성 명령 예시:
+
+```python
+!PYTHONPATH=src python -m sse_sleep.build_npz_dataset \
+  --input-csv "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_epoch_features.csv" \
+  --out "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_lstm_context20.npz" \
+  --summary-out "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_lstm_context20_summary.json" \
+  --context-epochs 20
+```
+
+## 현재까지 LSTM 실험 결과
+
+모델:
+
+- `src/sse_sleep/train_lstm.py`
+- 1-layer LSTM
+- causal context
+- target은 latest epoch label
+- output은 5-class
+- evaluation은 5-class와 4-class 둘 다 저장
+
+### Baseline 1: context10, hidden128, dropout0.2, inverse class weight
+
+```text
+5-class test Macro F1: 0.2972
+4-class test Macro F1: 0.3675
+5-class test Kappa:    0.1369
+```
+
+### Baseline 2: context10, hidden64, dropout0.4, inverse class weight
+
+```text
+5-class test Macro F1: 0.3036
+4-class test Macro F1: 0.3783
+5-class test Kappa:    0.1435
+```
+
+### Class weight 실험
+
+`--class-weight-mode` 옵션 추가됨:
+
+- `inverse`: 기존 방식. minority class 보정 강함.
+- `sqrt`: 보정 완화.
+- `none`: unweighted cross entropy.
+
+결론:
+
+- Accuracy는 `sqrt`/`none`에서 올라가지만 N1/N3가 거의 무너진다.
+- 5-class/4-class Macro F1 기준으로는 `inverse`가 가장 낫다.
+
+`sqrt h64 dropout0.4`:
+
+```text
+5-class test Macro F1: 0.2922
+4-class test Macro F1: 0.3520
+```
+
+`none h64 dropout0.4`:
+
+```text
+5-class test Macro F1: 0.2707
+4-class test Macro F1: 0.3447
+```
+
+### Context 길이 실험
+
+context10 -> context20 -> context30 비교.
+
+`context20 h64 dropout0.4 inverse`:
+
+```text
+5-class test Macro F1: 0.3252
+4-class test Macro F1: 0.3916
+5-class test Kappa:    0.1682
+4-class test Kappa:    0.1793
+
+Wake F1: 0.453
+N1 F1:   0.172
+N2 F1:   0.469
+N3 F1:   0.244
+REM F1:  0.288
+```
+
+`context30 h64 dropout0.4 inverse`:
+
+```text
+5-class test Macro F1: 0.3160
+4-class test Macro F1: 0.3805
+5-class test Kappa:    0.1655
+
+Wake F1: 0.419
+N1 F1:   0.204
+N2 F1:   0.515
+N3 F1:   0.186
+REM F1:  0.255
+```
+
+결론:
+
+- context20가 현재 기본 feature 기준 best.
+- context30은 N1/N2는 좋아지지만 Wake/N3/REM이 떨어진다.
+
+## 방금 진행하던 실험: Rolling/Delta Temporal Feature
+
+문제의식:
+
+- 기존 feature는 각 30초 epoch 안의 통계값만 있다.
+- 수면 단계는 흐름이 중요하다.
+- HR/IBI/움직임/체온/BVP가 이전 epoch 대비 어떻게 변했는지 feature로 명시하면 LSTM이 덜 힘들 수 있다.
+
+추가된 스크립트:
+
+```text
+src/sse_sleep/add_temporal_features.py
+```
+
+기능:
+
+- 기존 `dreamt_100hz_epoch_features.csv`를 읽는다.
+- subject별, aligned_epoch_index 순서로 처리한다.
+- subject 경계를 넘지 않는다.
+- epoch index gap이 있으면 history를 reset한다.
+- 현재 epoch보다 과거 epoch만 사용하므로 실시간 앱 조건과 맞다.
+
+기본 대상 base feature 10개:
+
+```text
+bvp_mean
+bvp_std
+acc_vm_mean
+acc_vm_activity
+temp_mean
+temp_slope
+hr_mean
+hr_std
+ibi_mean
+ibi_std
+```
+
+추가 feature:
+
+- `delta_1`
+- `delta_3`
+- `roll_mean_3`
+- `roll_std_3`
+- `roll_mean_5`
+- `roll_std_5`
+
+즉 10개 base feature * 6개 temporal transform = 60개 추가.
+
+기존 feature:
+
+```text
+67개
+```
+
+temporal feature 추가 후:
+
+```text
+127개
+```
+
+실행 명령:
+
+```python
+%cd /content/SSE
+!git pull
+
+!PYTHONPATH=src python -m sse_sleep.add_temporal_features \
+  --input-csv "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_epoch_features.csv" \
+  --out-csv "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_epoch_features_temporal.csv" \
+  --summary-out "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_temporal_features_summary.json"
+```
+
+그 다음 temporal CSV로 context20 NPZ 생성:
+
+```python
+!PYTHONPATH=src python -m sse_sleep.build_npz_dataset \
+  --input-csv "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_epoch_features_temporal.csv" \
+  --out "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_temporal_lstm_context20.npz" \
+  --summary-out "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_temporal_lstm_context20_summary.json" \
+  --context-epochs 20
+```
+
+학습:
+
+```python
+!PYTHONPATH=src python -m sse_sleep.train_lstm \
+  --npz "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_temporal_lstm_context20.npz" \
+  --out-dir "/content/drive/MyDrive/SSE_outputs/lstm_temporal_context20_h64_inverse" \
+  --hidden-size 64 \
+  --dropout 0.4 \
+  --class-weight-mode inverse
+```
+
+### Temporal feature 실험 결과
+
+파일:
+
+```text
+/Users/chan/Downloads/lstm_metrics-7.json
+```
+
+설정:
+
+```text
+context: 20
+features: 127
+hidden_size: 64
+dropout: 0.4
+class_weight_mode: inverse
+```
+
+결과:
+
+```text
+5-class test Macro F1: 0.3326
+4-class test Macro F1: 0.4036
+5-class test Kappa:    0.2258
+4-class test Kappa:    0.2633
+```
+
+기존 best `context20 base` 대비:
+
+```text
+5-class Macro F1: +0.0074
+4-class Macro F1: +0.0120
+5-class Kappa:    +0.0576
+4-class Kappa:    +0.0840
+```
+
+클래스별 변화:
+
+```text
+Wake F1: 0.453 -> 0.490
+N1 F1:   0.172 -> 0.177
+N2 F1:   0.469 -> 0.529
+N3 F1:   0.244 -> 0.051  크게 나빠짐
+REM F1:  0.288 -> 0.416  크게 좋아짐
+```
+
+해석:
+
+- rolling/delta feature는 전체적으로 효과가 있다.
+- 특히 Wake/N2/REM과 Kappa가 좋아졌다.
+- 그러나 N3가 크게 무너졌다.
+- 스마트 알람 앱 관점에서는 4-class Macro F1과 Kappa가 좋아진 점이 의미 있다.
+- 하지만 5-class 모델로는 N3 보존이 중요하므로 다음 실험은 N3를 살리는 방향이 좋다.
+
+현재 best:
+
+```text
+lstm_temporal_context20_h64_inverse
+5-class Macro F1: 0.3326
+4-class Macro F1: 0.4036
+```
+
+## 다음 채팅방에서 이어서 할 일
+
+바로 이어서 할 가장 좋은 다음 실험:
+
+### 1. Temporal context20에서 hidden size 128 실험
+
+의도:
+
+- temporal feature 추가로 feature 수가 67 -> 127로 증가했다.
+- hidden 64가 표현력이 부족해 N3를 못 살렸을 가능성이 있다.
+- hidden 128로 올리고 dropout 0.4를 유지해서 N3/REM/Wake 균형을 확인한다.
+
+실행:
+
+```python
+!PYTHONPATH=src python -m sse_sleep.train_lstm \
+  --npz "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_temporal_lstm_context20.npz" \
+  --out-dir "/content/drive/MyDrive/SSE_outputs/lstm_temporal_context20_h128_inverse" \
+  --hidden-size 128 \
+  --dropout 0.4 \
+  --class-weight-mode inverse
+```
+
+결과 파일:
+
+```text
+/content/drive/MyDrive/SSE_outputs/lstm_temporal_context20_h128_inverse/lstm_metrics.json
+```
+
+이 결과를 현재 best인 `lstm_metrics-7.json`과 비교한다.
+
+### 2. N3 보존 개선
+
+hidden128이 N3를 회복하지 못하면 다음 후보:
+
+- temporal feature set 조정
+- N3에 도움이 될 수 있는 feature 추가/선별
+- N3 class weight만 약간 강화하는 custom weight mode
+- Deep/N3 binary auxiliary head 또는 multi-task 구조
+
+### 3. 반복 split 확인
+
+현재는 seed 42 한 번이다. subject-wise split 민감성이 있어 보이므로, 최종 판단 전에는 seed를 2~3개 바꿔 반복해야 한다.
+
+예:
+
+```python
+--seed 7
+--seed 123
+```
+
+다만 split을 바꾸려면 `build_npz_dataset` 단계부터 다시 만들어야 한다.
+
+## 주요 코드 파일
+
+- `src/sse_sleep/preprocess_dreamt_100hz.py`: DreamT 100Hz raw CSV -> 30초 epoch feature CSV
+- `src/sse_sleep/add_temporal_features.py`: epoch feature CSV -> rolling/delta feature CSV
+- `src/sse_sleep/build_npz_dataset.py`: feature CSV -> subject-wise split NPZ
+- `src/sse_sleep/train_lstm.py`: LSTM 학습 및 5-class/4-class 평가
+- `src/sse_sleep/metrics.py`: Accuracy, Macro F1, Cohen's Kappa, confusion matrix, class-wise metrics
+- `src/sse_sleep/alarm.py`: 스마트 알람 정책 초안
+- `docs/dreamt_100hz_profile.md`: DreamT 데이터 구조 및 실행 명령 정리
+- `docs/dreamt_pipeline_design.md`: 전체 설계 문서
+
+## 다음 채팅방 시작 메시지 예시
+
+다음 채팅방에는 이 파일을 올리고 이렇게 시작하면 된다.
+
+```text
+이전 채팅방에서 DreamT data_100Hz 기반 수면 단계 예측 파이프라인을 여기까지 진행했다.
+docs/next_chat_handoff.md 내용을 읽고 이어서 진행해줘.
+우선 temporal context20 h128 inverse 실험 결과를 해석하거나, 아직 실행 전이면 실행 명령부터 안내해줘.
+```
+
