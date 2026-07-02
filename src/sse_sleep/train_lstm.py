@@ -66,9 +66,16 @@ def make_loader(x: np.ndarray, y: np.ndarray, batch_size: int, shuffle: bool) ->
     return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, drop_last=False)
 
 
-def class_weights(y_train: np.ndarray, num_classes: int) -> torch.Tensor:
+def class_weights(y_train: np.ndarray, num_classes: int, mode: str) -> torch.Tensor | None:
+    """Return class weights for cross entropy, or None for unweighted loss."""
+    if mode == "none":
+        return None
     counts = np.bincount(y_train.astype(np.int64), minlength=num_classes).astype(np.float32)
     weights = counts.sum() / np.maximum(counts, 1.0)
+    if mode == "sqrt":
+        weights = np.sqrt(weights)
+    elif mode != "inverse":
+        raise ValueError(f"Unknown class_weight_mode: {mode}")
     weights = weights / weights.mean()
     return torch.tensor(weights, dtype=torch.float32)
 
@@ -146,6 +153,7 @@ def train_lstm(
     weight_decay: float,
     patience: int,
     seed: int,
+    class_weight_mode: str,
 ) -> dict[str, Any]:
     set_seed(seed)
     arrays = load_npz(npz_path)
@@ -165,8 +173,9 @@ def train_lstm(
         dropout=dropout,
     ).to(device)
 
-    weights = class_weights(y_train, len(STAGE5_NAMES)).to(device)
-    criterion = nn.CrossEntropyLoss(weight=weights)
+    weights = class_weights(y_train, len(STAGE5_NAMES), mode=class_weight_mode)
+    weights_for_loss = weights.to(device) if weights is not None else None
+    criterion = nn.CrossEntropyLoss(weight=weights_for_loss)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
     train_loader = make_loader(x_train, y_train, batch_size=batch_size, shuffle=True)
@@ -217,6 +226,7 @@ def train_lstm(
                     "hidden_size": hidden_size,
                     "num_layers": num_layers,
                     "dropout": dropout,
+                    "class_weight_mode": class_weight_mode,
                     "feature_names": feature_names,
                     "stage5_names": STAGE5_NAMES,
                 },
@@ -248,6 +258,7 @@ def train_lstm(
             "lr": lr,
             "weight_decay": weight_decay,
             "patience": patience,
+            "class_weight_mode": class_weight_mode,
         },
         "array_shapes": {
             "X_train": list(x_train.shape),
@@ -256,7 +267,8 @@ def train_lstm(
         },
         "feature_names": feature_names,
         "stage5_names": list(STAGE5_NAMES),
-        "class_weights": weights.detach().cpu().numpy().tolist(),
+        "class_weight_mode": class_weight_mode,
+        "class_weights": None if weights is None else weights.detach().cpu().numpy().tolist(),
         "best_epoch": best_epoch,
         "best_val_macro_f1": best_val_macro_f1,
         "history": history,
@@ -295,6 +307,12 @@ def main() -> None:
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--patience", type=int, default=6)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--class-weight-mode",
+        choices=("inverse", "sqrt", "none"),
+        default="inverse",
+        help="Class weighting for CrossEntropyLoss. inverse matches the original behavior.",
+    )
     args = parser.parse_args()
 
     report = train_lstm(
@@ -309,10 +327,10 @@ def main() -> None:
         weight_decay=args.weight_decay,
         patience=args.patience,
         seed=args.seed,
+        class_weight_mode=args.class_weight_mode,
     )
     print(json.dumps({"best_epoch": report["best_epoch"], "final_test": report["final_test"]}, indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":
     main()
-

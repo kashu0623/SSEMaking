@@ -248,6 +248,32 @@ NPZ 생성이 완료되면 5-class LSTM classifier를 학습합니다.
   --out-dir "/content/drive/MyDrive/SSE_outputs/lstm_context10"
 ```
 
+Class imbalance 실험을 위해 loss weight 모드를 바꿀 수 있습니다.
+
+- `--class-weight-mode inverse`: 기본값. class frequency의 inverse를 사용합니다.
+- `--class-weight-mode sqrt`: inverse weight의 square root를 사용해 minority class 보정을 완화합니다.
+- `--class-weight-mode none`: unweighted cross entropy를 사용합니다.
+
+추천 비교 실험:
+
+```python
+!PYTHONPATH=src python -m sse_sleep.train_lstm \
+  --npz "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_lstm_context10.npz" \
+  --out-dir "/content/drive/MyDrive/SSE_outputs/lstm_context10_h64_sqrt_weight" \
+  --hidden-size 64 \
+  --dropout 0.4 \
+  --class-weight-mode sqrt
+```
+
+```python
+!PYTHONPATH=src python -m sse_sleep.train_lstm \
+  --npz "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_lstm_context10.npz" \
+  --out-dir "/content/drive/MyDrive/SSE_outputs/lstm_context10_h64_no_weight" \
+  --hidden-size 64 \
+  --dropout 0.4 \
+  --class-weight-mode none
+```
+
 출력 파일:
 
 - `lstm_best.pt`: validation 5-class Macro F1 기준 best checkpoint

@@ -69,6 +69,17 @@ PYTHONPATH=src python -m sse_sleep.train_lstm \
   --out-dir "/content/drive/MyDrive/SSE_outputs/lstm_context10"
 ```
 
+Class weight 비교:
+
+```bash
+PYTHONPATH=src python -m sse_sleep.train_lstm \
+  --npz "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_lstm_context10.npz" \
+  --out-dir "/content/drive/MyDrive/SSE_outputs/lstm_context10_h64_sqrt_weight" \
+  --hidden-size 64 \
+  --dropout 0.4 \
+  --class-weight-mode sqrt
+```
+
 그 다음 [docs/dreamt_pipeline_design.md](/Users/chan/Documents/SSE/docs/dreamt_pipeline_design.md)의 컬럼 매핑 기준에 따라 실제 파일 구조에 맞는 loader를 확정합니다.
 
 예시:
