@@ -202,6 +202,29 @@ Colab 명령:
 
 `SAO2`를 ablation에 포함하려면 `--include-sao2`를 추가합니다.
 
+## Rolling/Delta Feature 추가
+
+기본 epoch feature는 각 30초 구간의 통계값입니다. 수면 단계는 흐름이 중요하므로 subject 내부에서 이전 epoch 대비 변화량과 rolling 통계를 추가할 수 있습니다. 모든 rolling/delta feature는 현재 epoch보다 과거의 epoch만 사용하므로 실시간 앱 조건과 맞습니다.
+
+기본 추가 feature:
+
+- delta lag: 1 epoch, 3 epoch
+- rolling window: 3 epoch, 5 epoch
+- 대상 feature: `bvp_mean`, `bvp_std`, `acc_vm_mean`, `acc_vm_activity`, `temp_mean`, `temp_slope`, `hr_mean`, `hr_std`, `ibi_mean`, `ibi_std`
+
+Colab 명령:
+
+```python
+!PYTHONPATH=src python -m sse_sleep.add_temporal_features \
+  --input-csv "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_epoch_features.csv" \
+  --out-csv "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_epoch_features_temporal.csv" \
+  --summary-out "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_temporal_features_summary.json"
+```
+
+이 스크립트는 subject 경계를 넘지 않고, epoch index가 끊긴 곳에서는 history를 reset합니다.
+
+기본 설정에서는 10개 base feature에 대해 60개 temporal feature가 추가됩니다. 기존 67개 feature와 합치면 총 127개 feature가 됩니다.
+
 ## 학습용 NPZ 생성
 
 전처리가 완료되면 epoch feature CSV를 subject-wise train/validation/test split으로 나누고, causal sequence window를 만들어 `.npz`로 저장합니다.
@@ -218,10 +241,10 @@ Colab 명령:
 
 ```python
 !PYTHONPATH=src python -m sse_sleep.build_npz_dataset \
-  --input-csv "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_epoch_features.csv" \
-  --out "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_lstm_context10.npz" \
-  --summary-out "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_lstm_context10_summary.json" \
-  --context-epochs 10
+  --input-csv "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_epoch_features_temporal.csv" \
+  --out "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_temporal_lstm_context20.npz" \
+  --summary-out "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_temporal_lstm_context20_summary.json" \
+  --context-epochs 20
 ```
 
 출력:

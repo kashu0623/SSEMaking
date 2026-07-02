@@ -61,6 +61,25 @@ PYTHONPATH=src python -m sse_sleep.build_npz_dataset \
   --context-epochs 10
 ```
 
+Rolling/delta feature 추가:
+
+```bash
+PYTHONPATH=src python -m sse_sleep.add_temporal_features \
+  --input-csv "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_epoch_features.csv" \
+  --out-csv "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_epoch_features_temporal.csv" \
+  --summary-out "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_temporal_features_summary.json"
+```
+
+Temporal feature CSV로 context20 NPZ 생성:
+
+```bash
+PYTHONPATH=src python -m sse_sleep.build_npz_dataset \
+  --input-csv "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_epoch_features_temporal.csv" \
+  --out "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_temporal_lstm_context20.npz" \
+  --summary-out "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_temporal_lstm_context20_summary.json" \
+  --context-epochs 20
+```
+
 LSTM 학습:
 
 ```bash
