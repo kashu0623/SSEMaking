@@ -570,7 +570,32 @@ REM F1:  0.347
 
 ### 3. 반복 split 확인
 
-현재는 seed 42 한 번이다. subject-wise split 민감성이 있어 보이므로, 최종 판단 전에는 seed를 2~3개 바꿔 반복해야 한다.
+현재 seed 42 기준 multiplier sweep 결과:
+
+```text
+overall / Kappa best: temporal context20 h64 inverse, N3 multiplier 1.0
+Deep-aware Macro F1 best: temporal context20 h64 inverse, N3 multiplier 1.2
+
+1.0x:
+5-class Macro F1: 0.3326
+4-class Macro F1: 0.4036
+5-class Kappa:    0.2258
+4-class Kappa:    0.2633
+N3 F1:            0.0513
+REM F1:           0.4158
+
+1.2x:
+5-class Macro F1: 0.3418
+4-class Macro F1: 0.4183
+5-class Kappa:    0.1890
+4-class Kappa:    0.2204
+N3 F1:            0.2344
+REM F1:           0.3333
+```
+
+1.1x, 1.25x, 1.5x, 2.0x는 seed 42 기준으로 1.2x보다 열세였거나 trade-off가 컸다. 따라서 다음 검증은 `1.0x`와 `1.2x`만 seed 반복한다.
+
+subject-wise split 민감성이 있어 보이므로, 최종 판단 전에는 seed를 2개 추가해 반복한다.
 
 예:
 
@@ -579,7 +604,37 @@ REM F1:  0.347
 --seed 123
 ```
 
-다만 split을 바꾸려면 `build_npz_dataset` 단계부터 다시 만들어야 한다.
+split을 바꾸려면 `build_npz_dataset` 단계부터 다시 만들어야 한다. Colab에서는 다음 스크립트를 실행하면 seed 7/123에 대해 NPZ 생성 후 `1.0x`, `1.2x` 학습을 차례로 수행한다.
+
+```python
+%cd /content/SSE
+!git pull
+!bash scripts/run_temporal_seed_validation_colab.sh
+```
+
+스크립트:
+
+```text
+scripts/run_temporal_seed_validation_colab.sh
+```
+
+출력 예:
+
+```text
+/content/drive/MyDrive/SSE_outputs/dreamt_100hz_temporal_lstm_context20_seed7.npz
+/content/drive/MyDrive/SSE_outputs/lstm_temporal_context20_h64_inverse_seed7/lstm_metrics.json
+/content/drive/MyDrive/SSE_outputs/lstm_temporal_context20_h64_inverse_n3x12_seed7/lstm_metrics.json
+
+/content/drive/MyDrive/SSE_outputs/dreamt_100hz_temporal_lstm_context20_seed123.npz
+/content/drive/MyDrive/SSE_outputs/lstm_temporal_context20_h64_inverse_seed123/lstm_metrics.json
+/content/drive/MyDrive/SSE_outputs/lstm_temporal_context20_h64_inverse_n3x12_seed123/lstm_metrics.json
+```
+
+판단 기준:
+
+- 1.2x가 여러 seed에서 N3 F1을 일관되게 높이는지 확인한다.
+- 1.2x의 REM F1 하락과 Kappa 하락이 반복적으로 너무 크면 기본 모델은 1.0x로 둔다.
+- 1.2x가 4-class Macro F1 우세를 유지하고 Kappa 손실이 제한적이면 Deep-aware 기본 후보로 격상한다.
 
 ## 주요 코드 파일
 
