@@ -56,6 +56,24 @@ PYTHONPATH=src python -m sse_sleep.train_lstm \
 - `weighted_sampler_none_weight`: class weight 없이 minority class oversampling
 - `weighted_sampler_sqrt_weight`: sqrt weight + minority class oversampling
 
+## Focal gamma 1.5 후속 실험
+
+`gamma=1.0`과 `gamma=2.0` 사이의 균형점을 확인하기 위해 `gamma=1.5`를 3-seed로 따로 검증한다.
+
+```bash
+%cd /content/SSE
+!git pull
+!bash scripts/run_focal_g15_colab.sh
+```
+
+출력 폴더:
+
+```text
+/content/drive/MyDrive/SSE_outputs/lstm_temporal_context20_h64_inverse_focal_g15_seed42
+/content/drive/MyDrive/SSE_outputs/lstm_temporal_context20_h64_inverse_focal_g15_seed7
+/content/drive/MyDrive/SSE_outputs/lstm_temporal_context20_h64_inverse_focal_g15_seed123
+```
+
 ## 판단 기준
 
 1. 3-seed 평균에서 5-class Macro F1 또는 4-class Macro F1이 baseline보다 올라야 한다.
