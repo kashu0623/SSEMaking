@@ -53,15 +53,15 @@
 
 ## 앱 입력과의 대응
 
-최종 앱 raw 입력은 `IR PPG`, `RED PPG`, `ACC_X`, `ACC_Y`, `ACC_Z`, `TEMP`입니다.
+최종 앱 raw 입력은 `GREEN PPG`, `ACC_X`, `ACC_Y`, `ACC_Z`, `TEMP`입니다.
 
-DreamT `data_100Hz`에는 `IR PPG`, `RED PPG` raw column이 없습니다. 대신 `BVP`, `HR`, `IBI`, `SAO2`가 있습니다.
+DreamT `data_100Hz`에는 `GREEN PPG` raw column이 없습니다. 대신 `BVP`, `HR`, `IBI`, `SAO2`가 있습니다.
 
 따라서 1차 학습에서는 다음 정책을 사용합니다.
 
 - 앱 raw와 직접 일치: `ACC_X`, `ACC_Y`, `ACC_Z`, `TEMP`
 - 앱 PPG에서 계산 가능한 proxy/derived: `BVP`, `HR`, `IBI`
-- calibration 확인 후 optional: `SAO2`
+- DreamT-only ablation: `SAO2`
 - 앱 serving 모델에서 제외: EEG/EOG/EMG/ECG/호흡/이벤트/EDA 계열
 
 ## 1차 모델 입력 권장안
@@ -76,7 +76,7 @@ DreamT `data_100Hz`에는 `IR PPG`, `RED PPG` raw column이 없습니다. 대신
 - `HR`
 - `IBI`
 
-`SAO2`는 DreamT에는 있지만 실제 앱에서 RED/IR calibration이 확보되어야 안정적으로 계산할 수 있으므로 기본 입력에서는 제외하고 ablation으로 비교합니다.
+`SAO2`는 DreamT에는 있지만 GREEN 단일 PPG 앱 입력에서 안정적으로 계산할 수 없으므로 기본 입력에서는 제외하고 DreamT-only ablation으로만 비교합니다.
 
 PSG-rich upper-bound model:
 

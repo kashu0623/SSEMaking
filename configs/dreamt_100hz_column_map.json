@@ -33,12 +33,13 @@
   "app_proxy_or_derived_columns_available_in_dreamt": {
     "BVP": "BVP",
     "HR": "HR",
-    "IBI": "IBI",
-    "SPO2": "SAO2"
+    "IBI": "IBI"
   },
   "target_app_raw_columns_missing_in_dreamt": {
-    "IR_PPG": null,
-    "RED_PPG": null
+    "GREEN_PPG": null
+  },
+  "dreamt_only_optional_ablation_columns": {
+    "SPO2": "SAO2"
   },
   "dreamt_only_psg_columns": [
     "C4-M1",
@@ -76,7 +77,7 @@
       "HR",
       "IBI"
     ],
-    "optional_include_after_calibration_check": [
+    "dreamt_only_optional_ablation": [
       "SAO2"
     ],
     "exclude_from_app_serving_model": [

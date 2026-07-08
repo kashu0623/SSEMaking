@@ -6,8 +6,7 @@
 
 자체 제작 웨어러블 기기에서 실시간으로 들어오는 raw sensor:
 
-- `IR PPG`
-- `RED PPG`
+- `GREEN PPG`
 - `ACC_X`
 - `ACC_Y`
 - `ACC_Z`
@@ -92,15 +91,15 @@ DreamT Drive 폴더:
 - `TIMESTAMP`
 - PSG 계열: `C4-M1`, `F4-M1`, `O2-M1`, `Fp1-O2`, `T3 - CZ`, `CZ - T4`, `CHIN`, `E1`, `E2`, `ECG`, ...
 - 앱 후보/파생 feature 계열: `BVP`, `ACC_X`, `ACC_Y`, `ACC_Z`, `TEMP`, `HR`, `IBI`
-- optional: `SAO2`
+- DreamT-only optional ablation: `SAO2`
 - label: `Sleep_Stage`
 
 중요한 설계 판단:
 
-- DreamT에는 앱 raw 입력인 `IR_PPG`, `RED_PPG`가 직접 없다.
+- DreamT에는 앱 raw 입력인 `GREEN_PPG`가 직접 없다.
 - 대신 `BVP`, `HR`, `IBI`, `SAO2`가 있다.
 - 1차 앱 후보 모델에서는 `BVP`, `ACC_X/Y/Z`, `TEMP`, `HR`, `IBI`를 사용한다.
-- `SAO2`는 device calibration 이슈 때문에 core feature가 아니라 optional ablation으로 둔다.
+- `SAO2`는 GREEN 단일 PPG 앱 입력에서 안정적으로 계산할 수 없으므로 core feature가 아니라 DreamT-only optional ablation으로 둔다.
 - EEG/EOG/EMG/ECG/호흡/이벤트/EDA 계열은 앱 serving model 입력에서 제외한다.
 
 ## Sleep_Stage 라벨 구조
@@ -568,80 +567,80 @@ REM F1:  0.347
 - N3에 도움이 될 수 있는 feature 추가/선별
 - Deep/N3 binary auxiliary head 또는 multi-task 구조
 
-### 3. 반복 split 확인
+### 3. 반복 split 확인 결과
 
-현재 seed 42 기준 multiplier sweep 결과:
+N3 multiplier는 `1.0x`와 `1.2x`를 seed 42/7/123에서 반복 검증했다.
 
 ```text
-overall / Kappa best: temporal context20 h64 inverse, N3 multiplier 1.0
-Deep-aware Macro F1 best: temporal context20 h64 inverse, N3 multiplier 1.2
+3-seed mean:
 
-1.0x:
-5-class Macro F1: 0.3326
-4-class Macro F1: 0.4036
-5-class Kappa:    0.2258
-4-class Kappa:    0.2633
-N3 F1:            0.0513
-REM F1:           0.4158
-
-1.2x:
-5-class Macro F1: 0.3418
-4-class Macro F1: 0.4183
-5-class Kappa:    0.1890
-4-class Kappa:    0.2204
-N3 F1:            0.2344
-REM F1:           0.3333
+                 1.0x      1.2x
+5-class Macro F1 0.3224    0.3226
+5-class Kappa    0.2086    0.1908
+4-class Macro F1 0.3881    0.3883
+4-class Kappa    0.2273    0.2020
+N3 F1            0.0833    0.1477
+REM F1           0.3650    0.3339
+Wake F1          0.4966    0.4768
 ```
 
-1.1x, 1.25x, 1.5x, 2.0x는 seed 42 기준으로 1.2x보다 열세였거나 trade-off가 컸다. 따라서 다음 검증은 `1.0x`와 `1.2x`만 seed 반복한다.
+결론:
 
-subject-wise split 민감성이 있어 보이므로, 최종 판단 전에는 seed를 2개 추가해 반복한다.
-
-예:
-
-```python
---seed 7
---seed 123
+```text
+기본 모델: temporal context20 h64 inverse 1.0x
+1.2x: Deep-aware ablation으로만 보관
 ```
 
-split을 바꾸려면 `build_npz_dataset` 단계부터 다시 만들어야 한다. Colab에서는 다음 스크립트를 실행하면 seed 7/123에 대해 NPZ 생성 후 `1.0x`, `1.2x` 학습을 차례로 수행한다.
+1.2x는 seed42에서는 N3를 크게 살렸지만 seed7에서는 실패했고 seed123에서는 거의 차이가 없었다. 평균 Macro F1은 거의 같지만 Kappa, Wake, REM이 낮아지므로 기본 모델로는 1.0x가 더 안정적이다.
+
+### 4. 다음 실험: GRU h64 inverse
+
+hidden size 증가와 N3 weight 조정이 안정적 개선을 만들지 못했으므로, 같은 temporal context20 입력과 inverse weight에서 recurrent cell만 LSTM에서 GRU로 바꿔 비교한다.
+
+추가된 옵션:
+
+```text
+--model-type lstm|gru
+```
+
+기존 LSTM 실험 재현에는 영향이 없도록 기본값은 `lstm`이다.
+
+Colab 실행:
 
 ```python
 %cd /content/SSE
 !git pull
-!bash scripts/run_temporal_seed_validation_colab.sh
-```
-
-스크립트:
-
-```text
-scripts/run_temporal_seed_validation_colab.sh
+!bash scripts/run_gru_seed_validation_colab.sh
 ```
 
 출력 예:
 
 ```text
-/content/drive/MyDrive/SSE_outputs/dreamt_100hz_temporal_lstm_context20_seed7.npz
-/content/drive/MyDrive/SSE_outputs/lstm_temporal_context20_h64_inverse_seed7/lstm_metrics.json
-/content/drive/MyDrive/SSE_outputs/lstm_temporal_context20_h64_inverse_n3x12_seed7/lstm_metrics.json
+/content/drive/MyDrive/SSE_outputs/gru_temporal_context20_h64_inverse_seed42/lstm_metrics.json
+/content/drive/MyDrive/SSE_outputs/gru_temporal_context20_h64_inverse_seed7/lstm_metrics.json
+/content/drive/MyDrive/SSE_outputs/gru_temporal_context20_h64_inverse_seed123/lstm_metrics.json
+```
 
-/content/drive/MyDrive/SSE_outputs/dreamt_100hz_temporal_lstm_context20_seed123.npz
-/content/drive/MyDrive/SSE_outputs/lstm_temporal_context20_h64_inverse_seed123/lstm_metrics.json
-/content/drive/MyDrive/SSE_outputs/lstm_temporal_context20_h64_inverse_n3x12_seed123/lstm_metrics.json
+비교 대상은 LSTM 1.0x seed 42/7/123 결과다.
+
+```text
+seed42: /content/drive/MyDrive/SSE_outputs/lstm_temporal_context20_h64_inverse/lstm_metrics.json
+seed7:  /content/drive/MyDrive/SSE_outputs/lstm_temporal_context20_h64_inverse_seed7/lstm_metrics.json
+seed123:/content/drive/MyDrive/SSE_outputs/lstm_temporal_context20_h64_inverse_seed123/lstm_metrics.json
 ```
 
 판단 기준:
 
-- 1.2x가 여러 seed에서 N3 F1을 일관되게 높이는지 확인한다.
-- 1.2x의 REM F1 하락과 Kappa 하락이 반복적으로 너무 크면 기본 모델은 1.0x로 둔다.
-- 1.2x가 4-class Macro F1 우세를 유지하고 Kappa 손실이 제한적이면 Deep-aware 기본 후보로 격상한다.
+- GRU가 3-seed 평균 4-class Macro F1 또는 Kappa를 LSTM보다 올리는지 본다.
+- N3 F1이 조금 좋아져도 Wake/REM/Kappa가 무너지면 채택하지 않는다.
+- GRU가 안정적이지 않으면 다음 후보는 temporal feature ablation 또는 causal smoothing 평가다.
 
 ## 주요 코드 파일
 
 - `src/sse_sleep/preprocess_dreamt_100hz.py`: DreamT 100Hz raw CSV -> 30초 epoch feature CSV
 - `src/sse_sleep/add_temporal_features.py`: epoch feature CSV -> rolling/delta feature CSV
 - `src/sse_sleep/build_npz_dataset.py`: feature CSV -> subject-wise split NPZ
-- `src/sse_sleep/train_lstm.py`: LSTM 학습 및 5-class/4-class 평가
+- `src/sse_sleep/train_lstm.py`: LSTM/GRU 학습 및 5-class/4-class 평가
 - `src/sse_sleep/metrics.py`: Accuracy, Macro F1, Cohen's Kappa, confusion matrix, class-wise metrics
 - `src/sse_sleep/alarm.py`: 스마트 알람 정책 초안
 - `docs/dreamt_100hz_profile.md`: DreamT 데이터 구조 및 실행 명령 정리
@@ -654,5 +653,5 @@ scripts/run_temporal_seed_validation_colab.sh
 ```text
 이전 채팅방에서 DreamT data_100Hz 기반 수면 단계 예측 파이프라인을 여기까지 진행했다.
 docs/next_chat_handoff.md 내용을 읽고 이어서 진행해줘.
-우선 temporal context20 h128 inverse 실험 결과를 해석하거나, 아직 실행 전이면 실행 명령부터 안내해줘.
+우선 GRU temporal context20 h64 inverse seed 반복 결과를 해석하거나, 아직 실행 전이면 실행 명령부터 안내해줘.
 ```

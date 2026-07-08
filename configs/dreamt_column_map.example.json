@@ -5,16 +5,14 @@
   "timestamp": "timestamp",
   "sample_index": null,
   "sampling_rate_hz": {
-    "IR_PPG": null,
-    "RED_PPG": null,
+    "GREEN_PPG": null,
     "ACC_X": null,
     "ACC_Y": null,
     "ACC_Z": null,
     "TEMP": null
   },
   "signals": {
-    "IR_PPG": null,
-    "RED_PPG": null,
+    "GREEN_PPG": null,
     "ACC_X": null,
     "ACC_Y": null,
     "ACC_Z": null,
@@ -33,4 +31,3 @@
     "SPO2"
   ]
 }
-

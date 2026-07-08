@@ -12,8 +12,7 @@ Colab inspection 결과 `data_100Hz`는 100개 CSV 파일로 구성되어 있고
 
 최종 웨어러블 앱 raw 입력:
 
-- `IR PPG`
-- `RED PPG`
+- `GREEN PPG`
 - `ACC_X`
 - `ACC_Y`
 - `ACC_Z`
@@ -31,11 +30,11 @@ Colab inspection 결과 `data_100Hz`는 100개 CSV 파일로 구성되어 있고
 
 DreamT에 PPG, ACC, TEMP가 있으면 앱과 같은 입력군으로 맞춥니다.
 
-- PPG: `data_100Hz`에는 `IR_PPG`/`RED_PPG` raw가 없고 `BVP`, `HR`, `IBI`, `SAO2`가 있음
+- PPG: `data_100Hz`에는 `GREEN_PPG` raw가 없고 `BVP`, `HR`, `IBI`, `SAO2`가 있음
 - ACC: 3축이 있으면 vector magnitude와 움직임 feature 생성
 - TEMP: 저주파 추세와 안정도 feature 생성
 
-따라서 `data_100Hz` 1차 앱 후보 모델에서는 `BVP`, `HR`, `IBI`를 PPG-derived proxy로 사용합니다. 실제 앱에서는 `IR_PPG`/`RED_PPG` raw에서 동일 계열 feature를 계산해야 하므로 train-serving 차이를 별도 검증합니다.
+따라서 `data_100Hz` 1차 앱 후보 모델에서는 `BVP`, `HR`, `IBI`를 PPG-derived proxy로 사용합니다. 실제 앱에서는 `GREEN_PPG` raw에서 동일 계열 feature를 계산해야 하므로 train-serving 차이를 별도 검증합니다.
 
 DreamT에 ECG, EEG, EOG, EMG, airflow, SpO2 등이 있으면 기본 앱 모델 입력에서는 제외합니다. 단, 다음 용도는 허용합니다.
 
@@ -109,15 +108,14 @@ N4가 남아 있는 데이터는 N3로 병합합니다. Movement/Unknown/Artifac
 
 - PPG amplitude statistics: mean, std, median, IQR, min/max, slope
 - PPG quality: clipping ratio, missing ratio, flatline ratio, high-frequency noise proxy
-- BVP: IR/RED PPG에서 band-pass/filtering 후 pulse waveform proxy로 사용
+- BVP: GREEN PPG에서 band-pass/filtering 후 pulse waveform proxy로 사용
 - Heart rate feature: peak 기반 HR mean/std/min/max, valid beat ratio
 - IBI feature: beat-to-beat interval mean/std, SDNN, RMSSD, pNN50
 - HRV frequency feature: LF/HF는 30초 단독 epoch에서는 불안정하므로 multi-epoch window에서만 사용
-- Dual PPG feature: IR/RED correlation, normalized AC/DC ratio
 
 주의:
 
-- SpO2는 RED/IR와 calibration이 있어야 신뢰할 수 있으므로 `app_derived`로 두고 별도 검증 전에는 core feature에서 제외합니다.
+- SpO2는 GREEN 단일 PPG 앱 입력에서 안정적으로 계산할 수 없으므로 core feature에서 제외합니다. DreamT `SAO2`는 앱 serving 모델이 아니라 DreamT-only ablation 또는 upper-bound 분석에만 사용합니다.
 - HRV frequency-domain feature는 30초 단독 epoch에서는 불안정합니다. 주변 context window 또는 sequence model 입력에서 보조 feature로 사용합니다.
 
 ### ACC feature
@@ -177,7 +175,7 @@ EEG/EOG/EMG/ECG 등 앱 raw 입력에 없는 채널에서 직접 계산되는 fe
 초기 앱 후보 모델은 다음 구조를 권장합니다.
 
 - raw branch: PPG/ACC/TEMP epoch waveform 또는 downsampled segment를 CNN으로 인코딩
-- feature branch: BVP, HR, SpO2 proxy, IBI std, LF/HF, 움직임, 체온 feature sequence 입력
+- feature branch: BVP, HR, IBI std, LF/HF, 움직임, 체온 feature sequence 입력
 - temporal branch: CNN/feature embedding을 causal LSTM/GRU에 입력
 - output head: center/latest epoch의 5-class logit 출력
 

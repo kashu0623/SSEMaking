@@ -1,4 +1,4 @@
-"""Train and evaluate an LSTM sleep-stage classifier from a DreamT NPZ dataset."""
+"""Train and evaluate a recurrent sleep-stage classifier from a DreamT NPZ dataset."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from .labels import STAGE5_NAMES
 from .metrics import evaluate_5_and_4
 
 
-class LSTMSleepClassifier(nn.Module):
+class RecurrentSleepClassifier(nn.Module):
     def __init__(
         self,
         input_size: int,
@@ -26,10 +26,17 @@ class LSTMSleepClassifier(nn.Module):
         num_layers: int,
         num_classes: int = 5,
         dropout: float = 0.0,
+        model_type: str = "lstm",
     ) -> None:
         super().__init__()
         lstm_dropout = dropout if num_layers > 1 else 0.0
-        self.lstm = nn.LSTM(
+        if model_type == "lstm":
+            recurrent_cls = nn.LSTM
+        elif model_type == "gru":
+            recurrent_cls = nn.GRU
+        else:
+            raise ValueError(f"Unknown model_type: {model_type}")
+        self.recurrent = recurrent_cls(
             input_size=input_size,
             hidden_size=hidden_size,
             num_layers=num_layers,
@@ -43,7 +50,7 @@ class LSTMSleepClassifier(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        output, _ = self.lstm(x)
+        output, _ = self.recurrent(x)
         latest = output[:, -1, :]
         return self.head(latest)
 
@@ -166,6 +173,7 @@ def train_lstm(
     seed: int,
     class_weight_mode: str,
     n3_weight_multiplier: float,
+    model_type: str,
 ) -> dict[str, Any]:
     set_seed(seed)
     arrays = load_npz(npz_path)
@@ -178,11 +186,12 @@ def train_lstm(
     feature_names = arrays["feature_names"].astype(str).tolist()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = LSTMSleepClassifier(
+    model = RecurrentSleepClassifier(
         input_size=x_train.shape[-1],
         hidden_size=hidden_size,
         num_layers=num_layers,
         dropout=dropout,
+        model_type=model_type,
     ).to(device)
 
     weights = class_weights(
@@ -243,6 +252,7 @@ def train_lstm(
                     "hidden_size": hidden_size,
                     "num_layers": num_layers,
                     "dropout": dropout,
+                    "model_type": model_type,
                     "class_weight_mode": class_weight_mode,
                     "n3_weight_multiplier": n3_weight_multiplier,
                     "feature_names": feature_names,
@@ -276,6 +286,7 @@ def train_lstm(
             "lr": lr,
             "weight_decay": weight_decay,
             "patience": patience,
+            "model_type": model_type,
             "class_weight_mode": class_weight_mode,
             "n3_weight_multiplier": n3_weight_multiplier,
         },
@@ -328,6 +339,12 @@ def main() -> None:
     parser.add_argument("--patience", type=int, default=6)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
+        "--model-type",
+        choices=("lstm", "gru"),
+        default="lstm",
+        help="Recurrent cell type. Defaults to lstm to preserve previous experiments.",
+    )
+    parser.add_argument(
         "--class-weight-mode",
         choices=("inverse", "sqrt", "none"),
         default="inverse",
@@ -355,6 +372,7 @@ def main() -> None:
         seed=args.seed,
         class_weight_mode=args.class_weight_mode,
         n3_weight_multiplier=args.n3_weight_multiplier,
+        model_type=args.model_type,
     )
     print(json.dumps({"best_epoch": report["best_epoch"], "final_test": report["final_test"]}, indent=2, ensure_ascii=False))
 

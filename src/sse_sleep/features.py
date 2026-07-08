@@ -91,21 +91,11 @@ def quality_features(values: Sequence[Number | None], prefix: str) -> dict[str, 
     }
 
 
-def ppg_epoch_features(ir_ppg: Sequence[Number | None], red_ppg: Sequence[Number | None] | None = None) -> dict[str, float | None]:
-    """Extract app-computable PPG features for one 30-second epoch."""
+def ppg_epoch_features(green_ppg: Sequence[Number | None]) -> dict[str, float | None]:
+    """Extract app-computable GREEN PPG features for one 30-second epoch."""
     features = {}
-    features.update(basic_stats(ir_ppg, "ir_ppg"))
-    features.update(quality_features(ir_ppg, "ir_ppg"))
-    if red_ppg is not None:
-        features.update(basic_stats(red_ppg, "red_ppg"))
-        features.update(quality_features(red_ppg, "red_ppg"))
-        paired = [(float(ir), float(red)) for ir, red in zip(ir_ppg, red_ppg, strict=False) if ir is not None and red is not None]
-        if len(paired) > 1:
-            ir_values = [pair[0] for pair in paired]
-            red_values = [pair[1] for pair in paired]
-            features["ir_red_mean_diff"] = statistics.fmean(ir_values) - statistics.fmean(red_values)
-        else:
-            features["ir_red_mean_diff"] = None
+    features.update(basic_stats(green_ppg, "green_ppg"))
+    features.update(quality_features(green_ppg, "green_ppg"))
     return features
 
 
@@ -141,4 +131,3 @@ def temp_epoch_features(temp: Sequence[Number | None], session_baseline: float |
     else:
         features["temp_baseline_delta"] = None
     return features
-
