@@ -117,6 +117,12 @@ PYTHONPATH=src python -m sse_sleep.train_lstm \
 bash scripts/run_learning_improvement_colab.sh
 ```
 
+Deep/N3 auxiliary head 실험:
+
+```bash
+bash scripts/run_deep_aux_colab.sh
+```
+
 재학습 후 저장된 확률 출력으로 causal smoothing을 평가합니다. 자세한 기준은 [docs/causal_smoothing_evaluation.md](/Users/chan/Documents/SSE/docs/causal_smoothing_evaluation.md)에 있습니다.
 
 ```bash

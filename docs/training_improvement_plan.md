@@ -30,6 +30,9 @@ PYTHONPATH=src python -m sse_sleep.train_lstm \
 - `--focal-gamma`
 - `--label-smoothing`
 - `--train-sampler none|weighted`
+- `--aux-head none|deep`
+- `--aux-weight`
+- `--aux-deep-pos-weight-mode balanced|none`
 
 ## 1차 후보 실험
 
@@ -72,6 +75,53 @@ PYTHONPATH=src python -m sse_sleep.train_lstm \
 /content/drive/MyDrive/SSE_outputs/lstm_temporal_context20_h64_inverse_focal_g15_seed42
 /content/drive/MyDrive/SSE_outputs/lstm_temporal_context20_h64_inverse_focal_g15_seed7
 /content/drive/MyDrive/SSE_outputs/lstm_temporal_context20_h64_inverse_focal_g15_seed123
+```
+
+## Deep/N3 auxiliary head 실험
+
+5-class stage head와 별도로 `N3 vs non-N3` binary head를 붙여 encoder가 Deep/N3 구분을 더 명시적으로 배우게 한다.
+
+구조:
+
+```text
+shared LSTM encoder
+  -> 5-class stage head
+  -> Deep/N3 binary auxiliary head
+```
+
+loss:
+
+```text
+total_loss = stage_loss + aux_weight * deep_binary_loss
+```
+
+빠른 seed42 sweep:
+
+```bash
+%cd /content/SSE
+!git pull
+!bash scripts/run_deep_aux_colab.sh
+```
+
+기본 aux weight 후보:
+
+```text
+0.2
+0.5
+1.0
+```
+
+유망한 weight만 3-seed로 확장:
+
+```bash
+!SEEDS="42 7 123" AUX_WEIGHTS="0.5" bash scripts/run_deep_aux_colab.sh
+```
+
+`lstm_metrics.json`에는 기존 5-class/4-class 지표와 함께 아래 Deep binary 지표가 저장된다.
+
+```text
+final_test.deep_binary_from_stage_metrics
+final_test.deep_binary_aux_metrics
 ```
 
 ## 판단 기준

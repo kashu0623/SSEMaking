@@ -16,7 +16,10 @@ from torch import nn
 from torch.utils.data import DataLoader, TensorDataset, WeightedRandomSampler
 
 from .labels import STAGE5_NAMES
-from .metrics import evaluate_5_and_4
+from .metrics import evaluate, evaluate_5_and_4
+
+
+DEEP_BINARY_NAMES = ("not_N3", "N3")
 
 
 class RecurrentSleepClassifier(nn.Module):
@@ -28,8 +31,12 @@ class RecurrentSleepClassifier(nn.Module):
         num_classes: int = 5,
         dropout: float = 0.0,
         model_type: str = "lstm",
+        aux_head: str = "none",
     ) -> None:
         super().__init__()
+        if aux_head not in {"none", "deep"}:
+            raise ValueError(f"Unknown aux_head: {aux_head}")
+        self.aux_head = aux_head
         lstm_dropout = dropout if num_layers > 1 else 0.0
         if model_type == "lstm":
             recurrent_cls = nn.LSTM
@@ -49,11 +56,23 @@ class RecurrentSleepClassifier(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(hidden_size, num_classes),
         )
+        self.deep_head = (
+            nn.Sequential(
+                nn.LayerNorm(hidden_size),
+                nn.Dropout(dropout),
+                nn.Linear(hidden_size, 1),
+            )
+            if aux_head == "deep"
+            else None
+        )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
         output, _ = self.recurrent(x)
         latest = output[:, -1, :]
-        return self.head(latest)
+        outputs = {"stage_logits": self.head(latest)}
+        if self.deep_head is not None:
+            outputs["deep_logits"] = self.deep_head(latest).squeeze(1)
+        return outputs
 
 
 def set_seed(seed: int) -> None:
@@ -167,6 +186,39 @@ def make_criterion(
     raise ValueError(f"Unknown loss_type: {loss_type}")
 
 
+def make_deep_aux_criterion(
+    y_train: np.ndarray,
+    device: torch.device,
+    pos_weight_mode: str,
+) -> nn.Module:
+    if pos_weight_mode == "none":
+        return nn.BCEWithLogitsLoss()
+    if pos_weight_mode != "balanced":
+        raise ValueError(f"Unknown aux_deep_pos_weight_mode: {pos_weight_mode}")
+
+    n3_index = STAGE5_NAMES.index("N3")
+    positives = float(np.sum(y_train == n3_index))
+    negatives = float(y_train.shape[0] - positives)
+    if positives <= 0:
+        pos_weight = torch.tensor([1.0], dtype=torch.float32, device=device)
+    else:
+        pos_weight = torch.tensor([negatives / positives], dtype=torch.float32, device=device)
+    return nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+
+
+def deep_binary_labels(y_true_5: list[int]) -> list[int]:
+    n3_index = STAGE5_NAMES.index("N3")
+    return [1 if label == n3_index else 0 for label in y_true_5]
+
+
+def evaluate_deep_binary(y_true_5: list[int], y_pred_binary: list[int]) -> dict[str, Any]:
+    return json_ready(evaluate(deep_binary_labels(y_true_5), y_pred_binary, DEEP_BINARY_NAMES))
+
+
+def deep_predictions_from_stage(y_pred_5: list[int]) -> list[int]:
+    return deep_binary_labels(y_pred_5)
+
+
 def validation_score(metrics: dict[str, Any], selection_metric: str) -> float:
     metric_map = {
         "5_macro_f1": ("5_class", "macro_f1"),
@@ -187,16 +239,21 @@ def validation_score(metrics: dict[str, Any], selection_metric: str) -> float:
 def run_epoch(
     model: nn.Module,
     loader: DataLoader,
-    criterion: nn.Module,
+    stage_criterion: nn.Module,
     device: torch.device,
+    aux_criterion: nn.Module | None = None,
+    aux_weight: float = 0.0,
     optimizer: torch.optim.Optimizer | None = None,
-) -> tuple[float, list[int], list[int]]:
+) -> dict[str, Any]:
     training = optimizer is not None
     model.train(training)
     total_loss = 0.0
+    total_stage_loss = 0.0
+    total_aux_loss = 0.0
     total_count = 0
     y_true: list[int] = []
     y_pred: list[int] = []
+    deep_y_pred: list[int] = []
 
     for x_batch, y_batch in loader:
         x_batch = x_batch.to(device)
@@ -204,8 +261,15 @@ def run_epoch(
         if training:
             optimizer.zero_grad(set_to_none=True)
         with torch.set_grad_enabled(training):
-            logits = model(x_batch)
-            loss = criterion(logits, y_batch)
+            outputs = model(x_batch)
+            logits = outputs["stage_logits"]
+            stage_loss = stage_criterion(logits, y_batch)
+            loss = stage_loss
+            aux_loss = None
+            if aux_criterion is not None and "deep_logits" in outputs and aux_weight > 0:
+                deep_target = (y_batch == STAGE5_NAMES.index("N3")).float()
+                aux_loss = aux_criterion(outputs["deep_logits"], deep_target)
+                loss = loss + aux_weight * aux_loss
             if training:
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
@@ -213,11 +277,25 @@ def run_epoch(
 
         batch_size = y_batch.shape[0]
         total_loss += float(loss.detach().cpu()) * batch_size
+        total_stage_loss += float(stage_loss.detach().cpu()) * batch_size
+        if aux_loss is not None:
+            total_aux_loss += float(aux_loss.detach().cpu()) * batch_size
         total_count += batch_size
         y_true.extend(y_batch.detach().cpu().numpy().astype(int).tolist())
         y_pred.extend(logits.argmax(dim=1).detach().cpu().numpy().astype(int).tolist())
+        if "deep_logits" in outputs:
+            deep_y_pred.extend((torch.sigmoid(outputs["deep_logits"]) >= 0.5).detach().cpu().numpy().astype(int).tolist())
 
-    return total_loss / max(total_count, 1), y_true, y_pred
+    result: dict[str, Any] = {
+        "loss": total_loss / max(total_count, 1),
+        "stage_loss": total_stage_loss / max(total_count, 1),
+        "aux_loss": total_aux_loss / max(total_count, 1) if aux_criterion is not None and aux_weight > 0 else None,
+        "y_true": y_true,
+        "y_pred": y_pred,
+    }
+    if deep_y_pred:
+        result["deep_y_pred"] = deep_y_pred
+    return result
 
 
 def json_ready(value: Any) -> Any:
@@ -234,30 +312,58 @@ def json_ready(value: Any) -> Any:
     return value
 
 
-def evaluate_loader(model: nn.Module, loader: DataLoader, criterion: nn.Module, device: torch.device) -> dict[str, Any]:
+def evaluate_loader(
+    model: nn.Module,
+    loader: DataLoader,
+    stage_criterion: nn.Module,
+    device: torch.device,
+    aux_criterion: nn.Module | None = None,
+    aux_weight: float = 0.0,
+) -> dict[str, Any]:
     model.eval()
     total_loss = 0.0
+    total_stage_loss = 0.0
+    total_aux_loss = 0.0
     total_count = 0
     y_true: list[int] = []
     y_pred: list[int] = []
+    deep_y_pred: list[int] = []
     logits_batches: list[np.ndarray] = []
     prob_batches: list[np.ndarray] = []
+    deep_logit_batches: list[np.ndarray] = []
+    deep_prob_batches: list[np.ndarray] = []
 
     for x_batch, y_batch in loader:
         x_batch = x_batch.to(device)
         y_batch = y_batch.to(device)
         with torch.no_grad():
-            logits = model(x_batch)
-            loss = criterion(logits, y_batch)
+            outputs = model(x_batch)
+            logits = outputs["stage_logits"]
+            stage_loss = stage_criterion(logits, y_batch)
+            loss = stage_loss
+            aux_loss = None
+            if aux_criterion is not None and "deep_logits" in outputs and aux_weight > 0:
+                deep_target = (y_batch == STAGE5_NAMES.index("N3")).float()
+                aux_loss = aux_criterion(outputs["deep_logits"], deep_target)
+                loss = loss + aux_weight * aux_loss
             probabilities = torch.softmax(logits, dim=1)
 
         batch_size = y_batch.shape[0]
         total_loss += float(loss.detach().cpu()) * batch_size
+        total_stage_loss += float(stage_loss.detach().cpu()) * batch_size
+        if aux_loss is not None:
+            total_aux_loss += float(aux_loss.detach().cpu()) * batch_size
         total_count += batch_size
         y_true.extend(y_batch.detach().cpu().numpy().astype(int).tolist())
         y_pred.extend(logits.argmax(dim=1).detach().cpu().numpy().astype(int).tolist())
         logits_batches.append(logits.detach().cpu().numpy().astype(np.float32))
         prob_batches.append(probabilities.detach().cpu().numpy().astype(np.float32))
+        if "deep_logits" in outputs:
+            deep_logits = outputs["deep_logits"]
+            deep_probabilities = torch.sigmoid(deep_logits)
+            deep_y_pred.extend((deep_probabilities >= 0.5).detach().cpu().numpy().astype(int).tolist())
+            deep_logit_batches.append(deep_logits.detach().cpu().numpy().astype(np.float32))
+            deep_prob_batches.append(deep_probabilities.detach().cpu().numpy().astype(np.float32))
 
     loss = total_loss / max(total_count, 1)
     metrics = evaluate_5_and_4(y_true, y_pred)
@@ -273,11 +379,18 @@ def evaluate_loader(model: nn.Module, loader: DataLoader, criterion: nn.Module, 
     )
     return {
         "loss": loss,
+        "stage_loss": total_stage_loss / max(total_count, 1),
+        "aux_loss": total_aux_loss / max(total_count, 1) if aux_criterion is not None and aux_weight > 0 else None,
         "metrics": json_ready(metrics),
+        "deep_binary_from_stage_metrics": evaluate_deep_binary(y_true, deep_predictions_from_stage(y_pred)),
+        "deep_binary_aux_metrics": evaluate_deep_binary(y_true, deep_y_pred) if deep_y_pred else None,
         "y_true": y_true,
         "y_pred": y_pred,
+        "deep_y_pred": deep_y_pred,
         "logits": logits_array,
         "probabilities": prob_array,
+        "deep_logits": np.concatenate(deep_logit_batches, axis=0) if deep_logit_batches else None,
+        "deep_probabilities": np.concatenate(deep_prob_batches, axis=0) if deep_prob_batches else None,
     }
 
 
@@ -301,7 +414,12 @@ def train_lstm(
     label_smoothing: float,
     train_sampler: str,
     selection_metric: str,
+    aux_head: str,
+    aux_weight: float,
+    aux_deep_pos_weight_mode: str,
 ) -> dict[str, Any]:
+    if aux_weight < 0:
+        raise ValueError(f"aux_weight must be non-negative: {aux_weight}")
     set_seed(seed)
     arrays = load_npz(npz_path)
     x_train = arrays["X_train"].astype(np.float32)
@@ -319,6 +437,7 @@ def train_lstm(
         num_layers=num_layers,
         dropout=dropout,
         model_type=model_type,
+        aux_head=aux_head,
     ).to(device)
 
     weights = class_weights(
@@ -328,11 +447,16 @@ def train_lstm(
         n3_weight_multiplier=n3_weight_multiplier,
     )
     weights_for_loss = weights.to(device) if weights is not None else None
-    criterion = make_criterion(
+    stage_criterion = make_criterion(
         loss_type=loss_type,
         weights_for_loss=weights_for_loss,
         focal_gamma=focal_gamma,
         label_smoothing=label_smoothing,
+    )
+    aux_criterion = (
+        make_deep_aux_criterion(y_train, device=device, pos_weight_mode=aux_deep_pos_weight_mode)
+        if aux_head == "deep" and aux_weight > 0
+        else None
     )
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
@@ -352,23 +476,41 @@ def train_lstm(
     epochs_without_improvement = 0
 
     for epoch in range(1, epochs + 1):
-        train_loss, train_true, train_pred = run_epoch(
+        train_result = run_epoch(
             model=model,
             loader=train_loader,
-            criterion=criterion,
+            stage_criterion=stage_criterion,
             device=device,
+            aux_criterion=aux_criterion,
+            aux_weight=aux_weight,
             optimizer=optimizer,
         )
+        train_loss = train_result["loss"]
+        train_true = train_result["y_true"]
+        train_pred = train_result["y_pred"]
         train_metrics = evaluate_5_and_4(train_true, train_pred)
-        val_result = evaluate_loader(model=model, loader=val_loader, criterion=criterion, device=device)
+        val_result = evaluate_loader(
+            model=model,
+            loader=val_loader,
+            stage_criterion=stage_criterion,
+            device=device,
+            aux_criterion=aux_criterion,
+            aux_weight=aux_weight,
+        )
         selection_score = validation_score(val_result["metrics"], selection_metric)
 
         epoch_record = {
             "epoch": epoch,
             "train_loss": train_loss,
+            "train_stage_loss": train_result["stage_loss"],
+            "train_aux_loss": train_result["aux_loss"],
             "train_metrics": json_ready(train_metrics),
             "val_loss": val_result["loss"],
+            "val_stage_loss": val_result["stage_loss"],
+            "val_aux_loss": val_result["aux_loss"],
             "val_metrics": val_result["metrics"],
+            "val_deep_binary_from_stage_metrics": val_result["deep_binary_from_stage_metrics"],
+            "val_deep_binary_aux_metrics": val_result["deep_binary_aux_metrics"],
             "selection_metric": selection_metric,
             "selection_score": selection_score,
         }
@@ -403,6 +545,9 @@ def train_lstm(
                     "label_smoothing": label_smoothing,
                     "train_sampler": train_sampler,
                     "selection_metric": selection_metric,
+                    "aux_head": aux_head,
+                    "aux_weight": aux_weight,
+                    "aux_deep_pos_weight_mode": aux_deep_pos_weight_mode,
                     "feature_names": feature_names,
                     "stage5_names": STAGE5_NAMES,
                 },
@@ -416,8 +561,22 @@ def train_lstm(
 
     checkpoint = torch.load(best_model_path, map_location=device)
     model.load_state_dict(checkpoint["model_state_dict"])
-    val_final = evaluate_loader(model=model, loader=val_loader, criterion=criterion, device=device)
-    test_final = evaluate_loader(model=model, loader=test_loader, criterion=criterion, device=device)
+    val_final = evaluate_loader(
+        model=model,
+        loader=val_loader,
+        stage_criterion=stage_criterion,
+        device=device,
+        aux_criterion=aux_criterion,
+        aux_weight=aux_weight,
+    )
+    test_final = evaluate_loader(
+        model=model,
+        loader=test_loader,
+        stage_criterion=stage_criterion,
+        device=device,
+        aux_criterion=aux_criterion,
+        aux_weight=aux_weight,
+    )
 
     report = {
         "npz_path": str(npz_path),
@@ -442,6 +601,9 @@ def train_lstm(
             "label_smoothing": label_smoothing,
             "train_sampler": train_sampler,
             "selection_metric": selection_metric,
+            "aux_head": aux_head,
+            "aux_weight": aux_weight,
+            "aux_deep_pos_weight_mode": aux_deep_pos_weight_mode,
         },
         "array_shapes": {
             "X_train": list(x_train.shape),
@@ -464,11 +626,19 @@ def train_lstm(
         "history": history,
         "final_val": {
             "loss": val_final["loss"],
+            "stage_loss": val_final["stage_loss"],
+            "aux_loss": val_final["aux_loss"],
             "metrics": val_final["metrics"],
+            "deep_binary_from_stage_metrics": val_final["deep_binary_from_stage_metrics"],
+            "deep_binary_aux_metrics": val_final["deep_binary_aux_metrics"],
         },
         "final_test": {
             "loss": test_final["loss"],
+            "stage_loss": test_final["stage_loss"],
+            "aux_loss": test_final["aux_loss"],
             "metrics": test_final["metrics"],
+            "deep_binary_from_stage_metrics": test_final["deep_binary_from_stage_metrics"],
+            "deep_binary_aux_metrics": test_final["deep_binary_aux_metrics"],
         },
     }
 
@@ -485,6 +655,14 @@ def train_lstm(
         "test_probs": test_final["probabilities"],
         "stage5_names": np.asarray(STAGE5_NAMES),
     }
+    if val_final["deep_logits"] is not None:
+        prediction_arrays["val_deep_logits"] = val_final["deep_logits"]
+        prediction_arrays["val_deep_probs"] = val_final["deep_probabilities"]
+        prediction_arrays["val_deep_y_pred"] = np.asarray(val_final["deep_y_pred"], dtype=np.int64)
+    if test_final["deep_logits"] is not None:
+        prediction_arrays["test_deep_logits"] = test_final["deep_logits"]
+        prediction_arrays["test_deep_probs"] = test_final["deep_probabilities"]
+        prediction_arrays["test_deep_y_pred"] = np.asarray(test_final["deep_y_pred"], dtype=np.int64)
     for split_name in ("val", "test"):
         subject_key = f"{split_name}_subject_ids"
         epoch_key = f"{split_name}_epoch_indices"
@@ -565,6 +743,24 @@ def main() -> None:
         default="5_macro_f1",
         help="Validation metric used for best checkpoint selection and early stopping.",
     )
+    parser.add_argument(
+        "--aux-head",
+        choices=("none", "deep"),
+        default="none",
+        help="Optional auxiliary head. deep adds an N3-vs-non-N3 binary head.",
+    )
+    parser.add_argument(
+        "--aux-weight",
+        type=float,
+        default=0.0,
+        help="Weight for the auxiliary loss. Used when --aux-head deep.",
+    )
+    parser.add_argument(
+        "--aux-deep-pos-weight-mode",
+        choices=("balanced", "none"),
+        default="balanced",
+        help="Positive-class weighting for the Deep/N3 auxiliary BCE loss.",
+    )
     args = parser.parse_args()
 
     report = train_lstm(
@@ -587,6 +783,9 @@ def main() -> None:
         label_smoothing=args.label_smoothing,
         train_sampler=args.train_sampler,
         selection_metric=args.selection_metric,
+        aux_head=args.aux_head,
+        aux_weight=args.aux_weight,
+        aux_deep_pos_weight_mode=args.aux_deep_pos_weight_mode,
     )
     print(json.dumps({"best_epoch": report["best_epoch"], "final_test": report["final_test"]}, indent=2, ensure_ascii=False))
 
