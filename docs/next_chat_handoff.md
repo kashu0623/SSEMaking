@@ -2,6 +2,218 @@
 
 이 문서는 DreamT 기반 수면 단계 예측 모델 개발을 다음 채팅방에서 이어가기 위한 요약이다.
 
+## 최신 상태 요약: 2026-07-08
+
+현재 새 best 후보는 기존 `lstm_temporal_context20_h64_inverse`가 아니라 아래 모델이다.
+
+```text
+temporal w20 context20 h64 inverse
+```
+
+구성:
+
+- epoch feature CSV: `dreamt_100hz_epoch_features_temporal_w20.csv`
+- temporal transform:
+  - delta lags: `1, 3, 20`
+  - rolling windows: `3, 5, 20`
+- feature count: `157`
+- sequence context: `20` epochs
+- model: 1-layer LSTM
+- hidden size: `64`
+- dropout: `0.4`
+- class weight: `inverse`
+- loss: cross entropy
+
+3-seed 평균:
+
+```text
+                 original temporal   temporal w20   변화
+5-class Macro F1 0.3224              0.3266         +0.0042
+5-class Kappa    0.2086              0.2022         -0.0064
+4-class Macro F1 0.3881              0.4001         +0.0120
+4-class Kappa    0.2273              0.2365         +0.0092
+Wake F1          0.4966              0.5011         +0.0045
+N3 F1            0.0833              0.1234         +0.0401
+REM F1           0.3650              0.3433         -0.0217
+```
+
+판단:
+
+```text
+앱/4-class 관점 현재 best 후보: temporal w20 context20 h64 inverse
+5-class staging 관점: original temporal과 trade-off 있음
+남은 약점: REM F1 하락, 5-class Kappa 소폭 하락
+```
+
+### 최근 실험 결론
+
+아래 실험은 모두 w20 개선 후보로 확인했지만, w20 단독보다 최종적으로 낫지 않았다.
+
+```text
+w20 + focal_g2: seed42에서 바로 탈락
+w20 + focal_g15: 3-seed에서 N3/REM 하락, 탈락
+w20 + selection 4combo: seed42에서 w20과 동일 epoch 선택, 추가 이득 없음
+w20 + n3_weight 1.2: 3-seed에서 w20보다 하락, 탈락
+w10: seed42 탈락
+w30: seed42 탈락
+Deep/N3 auxiliary head: seed42 sweep에서 전체 균형 하락, 보류
+```
+
+따라서 다음 채팅방은 **w20 단독을 기준선으로 고정**하고, feature 설계를 더 정교하게 조정하는 방향으로 진행한다.
+
+### 다음 채팅방의 우선 작업
+
+목표는 w20의 장점인 N3/4-class 개선을 유지하면서 REM 하락을 줄이는 것이다. 가장 먼저 아래 feature ablation을 한다.
+
+#### 1. Targeted slow w20 feature set
+
+현재 full w20은 10개 base feature 전체에 `delta_20`, `roll_mean_20`, `roll_std_20`을 추가한다. 이 방식은 N3에는 도움이 됐지만 REM을 깎았다. 다음 실험은 long-window를 모든 feature에 붙이지 않고, N3와 관련이 큰 slow physiology/movement feature에만 붙인다.
+
+추천 feature set:
+
+```text
+acc_vm_activity
+acc_vm_mean
+hr_mean
+hr_std
+ibi_mean
+ibi_std
+temp_mean
+temp_slope
+```
+
+의도:
+
+- BVP long-window는 REM 구분을 흐릴 수 있으므로 우선 제외한다.
+- 움직임/HR/IBI/TEMP의 긴 안정성만 N3 cue로 추가한다.
+- 기존 short temporal feature는 유지한다.
+
+Colab 실행 예시:
+
+```python
+%cd /content/SSE
+!git pull
+
+# 1) 기존 short temporal feature 생성 또는 기존 파일 사용
+!PYTHONPATH=src python -m sse_sleep.add_temporal_features \
+  --input-csv "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_epoch_features.csv" \
+  --out-csv "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_epoch_features_temporal.csv" \
+  --summary-out "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_temporal_features_summary.json"
+
+# 2) short temporal CSV 위에 targeted w20만 추가
+!PYTHONPATH=src python -m sse_sleep.add_temporal_features \
+  --input-csv "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_epoch_features_temporal.csv" \
+  --out-csv "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_epoch_features_temporal_targeted_w20.csv" \
+  --summary-out "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_temporal_targeted_w20_features_summary.json" \
+  --base-features "acc_vm_activity,acc_vm_mean,hr_mean,hr_std,ibi_mean,ibi_std,temp_mean,temp_slope" \
+  --delta-windows 20 \
+  --rolling-window-list 20
+
+# 3) context20 NPZ
+!PYTHONPATH=src python -m sse_sleep.build_npz_dataset \
+  --input-csv "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_epoch_features_temporal_targeted_w20.csv" \
+  --out "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_temporal_targeted_w20_lstm_context20.npz" \
+  --summary-out "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_temporal_targeted_w20_lstm_context20_summary.json" \
+  --context-epochs 20
+
+# 4) seed42 학습
+!PYTHONPATH=src python -m sse_sleep.train_lstm \
+  --npz "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_temporal_targeted_w20_lstm_context20.npz" \
+  --out-dir "/content/drive/MyDrive/SSE_outputs/lstm_temporal_targeted_w20_context20_h64_inverse" \
+  --hidden-size 64 \
+  --dropout 0.4 \
+  --class-weight-mode inverse
+```
+
+판단 기준:
+
+```text
+targeted_w20이 full w20 대비:
+- 4-class Macro F1/Kappa를 유지 또는 개선하는지
+- REM F1이 회복되는지
+- N3 F1이 full w20의 0.1234 근처를 유지하는지
+```
+
+seed42에서 좋으면 seed7/123으로 확장한다. seed42에서 full w20보다 명확히 나쁘면 중단한다.
+
+#### 2. REM-preserving w20 ablation
+
+targeted slow w20 다음 후보는 full w20에서 REM을 해칠 수 있는 long-window feature만 제외하는 ablation이다.
+
+우선 제외 후보:
+
+```text
+bvp_mean
+bvp_std
+```
+
+즉, long-window 대상은 다음 8개로 제한한다.
+
+```text
+acc_vm_mean
+acc_vm_activity
+temp_mean
+temp_slope
+hr_mean
+hr_std
+ibi_mean
+ibi_std
+```
+
+이것은 targeted slow w20과 거의 같은 방향이다. seed42 결과가 애매하면 base feature 조합을 조금 좁혀 다음처럼 비교한다.
+
+```text
+movement_only_w20: acc_vm_mean, acc_vm_activity
+cardio_temp_w20: hr_mean, hr_std, ibi_mean, ibi_std, temp_mean, temp_slope
+```
+
+#### 3. Causal per-night baseline feature
+
+long-window ablation이 한계에 닿으면, 다음은 개인/밤별 기준선 feature를 추가한다. 앱에서도 계산 가능한 방식이어야 하므로 미래를 쓰지 않는 expanding history만 사용한다.
+
+후보:
+
+```text
+feature_expanding_mean
+feature_expanding_std
+feature_causal_zscore
+```
+
+대상 feature:
+
+```text
+acc_vm_activity
+hr_mean
+ibi_mean
+temp_mean
+bvp_std
+```
+
+의도:
+
+- subject마다 HR/IBI/TEMP baseline이 다르므로 global normalized raw value만으로는 수면단계 분리가 어려울 수 있다.
+- 현재 epoch가 “그 밤의 이전 흐름 대비 낮은 움직임/안정 HR/안정 IBI인지”를 표현한다.
+
+주의:
+
+- 반드시 현재 epoch 이전 history만 쓰거나, 현재 epoch 포함 causal expanding만 쓴다.
+- subject/test leakage 금지.
+- serving에서도 같은 방식으로 online 업데이트 가능해야 한다.
+
+#### 4. 모델 구조 실험은 뒤로 미룬다
+
+지금까지의 실험상 loss/auxiliary head로 N3를 억지로 올리면 REM/Wake/Kappa 손실이 반복됐다. 따라서 다음 채팅방의 1순위는 구조 변경이 아니라 feature ablation이다.
+
+보류:
+
+```text
+focal 추가 탐색
+Deep auxiliary head 추가 탐색
+weighted sampler
+hidden128
+GRU 기본 채택
+```
+
 ## 프로젝트 목표
 
 자체 제작 웨어러블 기기에서 실시간으로 들어오는 raw sensor:
@@ -756,5 +968,6 @@ scripts/run_learning_improvement_colab.sh
 ```text
 이전 채팅방에서 DreamT data_100Hz 기반 수면 단계 예측 파이프라인을 여기까지 진행했다.
 docs/next_chat_handoff.md 내용을 읽고 이어서 진행해줘.
-우선 LSTM temporal context20 h64 inverse 1.0x 기본 모델에 대해 causal smoothing 평가를 설계하고, 필요하면 train_lstm.py가 logits/probabilities를 저장하도록 수정해줘.
+현재 앱/4-class 관점 best 후보는 temporal w20 context20 h64 inverse다.
+다음 작업은 w20의 REM F1 하락을 줄이기 위한 targeted slow w20 feature 실험부터 진행해줘.
 ```

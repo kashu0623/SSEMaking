@@ -1,8 +1,28 @@
 # Training Improvement Plan
 
-현재 기본 모델은 `LSTM temporal context20 h64 inverse 1.0x`다. Causal smoothing은 후처리 진단으로 미루고, 우선 모델 자체의 5-class/4-class 성능을 올리는 실험을 진행한다.
+현재 앱/4-class 관점의 새 best 후보는 `temporal w20 context20 h64 inverse`다. Causal smoothing은 후처리 진단으로 미루고, 우선 모델 자체의 5-class/4-class 성능을 올리는 실험을 진행한다.
 
-## 기준 모델
+최신 3-seed 평균:
+
+```text
+                 original temporal   temporal w20   변화
+5-class Macro F1 0.3224              0.3266         +0.0042
+5-class Kappa    0.2086              0.2022         -0.0064
+4-class Macro F1 0.3881              0.4001         +0.0120
+4-class Kappa    0.2273              0.2365         +0.0092
+Wake F1          0.4966              0.5011         +0.0045
+N3 F1            0.0833              0.1234         +0.0401
+REM F1           0.3650              0.3433         -0.0217
+```
+
+현재 결론:
+
+```text
+기본 후보: temporal w20 context20 h64 inverse
+개선 목표: N3/4-class 이득을 유지하면서 REM F1 하락을 줄이기
+```
+
+## 이전 기준 모델
 
 ```bash
 PYTHONPATH=src python -m sse_sleep.train_lstm \
@@ -13,7 +33,27 @@ PYTHONPATH=src python -m sse_sleep.train_lstm \
   --class-weight-mode inverse
 ```
 
-3-seed 기준으로 LSTM 1.0x는 안정성이 GRU보다 낫고, N3 1.2x는 N3 F1을 올리지만 Wake/REM/Kappa 손실이 있었다. 다음 실험은 구조를 크게 바꾸기 전에 loss, sampler, checkpoint selection을 점검한다.
+3-seed 기준으로 original temporal LSTM 1.0x는 안정성이 GRU보다 낫고, N3 1.2x는 N3 F1을 올리지만 Wake/REM/Kappa 손실이 있었다. 이후 temporal long-window 실험에서 w20이 앱/4-class 관점 새 best 후보가 되었다.
+
+## 현재 기준 모델
+
+```bash
+PYTHONPATH=src python -m sse_sleep.train_lstm \
+  --npz "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_temporal_w20_lstm_context20.npz" \
+  --out-dir "/content/drive/MyDrive/SSE_outputs/lstm_temporal_w20_context20_h64_inverse" \
+  --hidden-size 64 \
+  --dropout 0.4 \
+  --class-weight-mode inverse
+```
+
+이 기준 위에서 이미 확인한 결과:
+
+```text
+w20 + focal_g2: 탈락
+w20 + focal_g15: 3-seed에서 w20 단독보다 N3/REM 하락
+w20 + selection 4combo: seed42에서 w20과 동일
+w20 + n3_weight 1.2: 3-seed에서 w20 단독보다 하락
+```
 
 ## 새 학습 옵션
 
@@ -172,6 +212,99 @@ seed42에서 w10/w20 빠른 비교:
 --delta-windows 1 3 10
 --rolling-window-list 3 5 10
 ```
+
+결론:
+
+```text
+w10: 탈락
+w20: 새 best 후보
+w30: 탈락
+```
+
+## 다음 feature 개선 계획
+
+다음 목표는 full w20의 장점인 4-class/N3 개선을 유지하면서 REM F1 하락을 줄이는 것이다.
+
+### 1. Targeted slow w20
+
+기존 short temporal feature는 유지하고, long-window 20 feature는 N3와 관련성이 큰 slow physiology/movement feature에만 추가한다.
+
+추천 대상:
+
+```text
+acc_vm_activity
+acc_vm_mean
+hr_mean
+hr_std
+ibi_mean
+ibi_std
+temp_mean
+temp_slope
+```
+
+Colab seed42 실행:
+
+```bash
+PYTHONPATH=src python -m sse_sleep.add_temporal_features \
+  --input-csv "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_epoch_features_temporal.csv" \
+  --out-csv "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_epoch_features_temporal_targeted_w20.csv" \
+  --summary-out "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_temporal_targeted_w20_features_summary.json" \
+  --base-features "acc_vm_activity,acc_vm_mean,hr_mean,hr_std,ibi_mean,ibi_std,temp_mean,temp_slope" \
+  --delta-windows 20 \
+  --rolling-window-list 20
+
+PYTHONPATH=src python -m sse_sleep.build_npz_dataset \
+  --input-csv "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_epoch_features_temporal_targeted_w20.csv" \
+  --out "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_temporal_targeted_w20_lstm_context20.npz" \
+  --summary-out "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_temporal_targeted_w20_lstm_context20_summary.json" \
+  --context-epochs 20
+
+PYTHONPATH=src python -m sse_sleep.train_lstm \
+  --npz "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_temporal_targeted_w20_lstm_context20.npz" \
+  --out-dir "/content/drive/MyDrive/SSE_outputs/lstm_temporal_targeted_w20_context20_h64_inverse" \
+  --hidden-size 64 \
+  --dropout 0.4 \
+  --class-weight-mode inverse
+```
+
+판단 기준:
+
+```text
+full w20 대비 REM F1 회복
+full w20 대비 4-class Macro F1/Kappa 유지 또는 개선
+N3 F1은 full w20 평균 0.1234 근처 유지
+```
+
+### 2. Narrow ablation
+
+targeted slow w20이 애매하면 long-window target을 더 좁혀 비교한다.
+
+```text
+movement_only_w20: acc_vm_mean, acc_vm_activity
+cardio_temp_w20: hr_mean, hr_std, ibi_mean, ibi_std, temp_mean, temp_slope
+```
+
+### 3. Causal per-night baseline feature
+
+long-window ablation 이후에는 subject/night baseline 차이를 causal하게 보정하는 feature를 검토한다.
+
+```text
+feature_expanding_mean
+feature_expanding_std
+feature_causal_zscore
+```
+
+대상:
+
+```text
+acc_vm_activity
+hr_mean
+ibi_mean
+temp_mean
+bvp_std
+```
+
+이 feature는 앱에서도 online으로 계산 가능해야 하며, 미래 epoch나 test subject 통계 leakage를 쓰면 안 된다.
 
 ## 판단 기준
 
