@@ -245,26 +245,19 @@ temp_slope
 Colab seed42 실행:
 
 ```bash
-PYTHONPATH=src python -m sse_sleep.add_temporal_features \
-  --input-csv "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_epoch_features_temporal.csv" \
-  --out-csv "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_epoch_features_temporal_targeted_w20.csv" \
-  --summary-out "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_temporal_targeted_w20_features_summary.json" \
-  --base-features "acc_vm_activity,acc_vm_mean,hr_mean,hr_std,ibi_mean,ibi_std,temp_mean,temp_slope" \
-  --delta-windows 20 \
-  --rolling-window-list 20
+bash scripts/run_targeted_slow_w20_colab.sh
+```
 
-PYTHONPATH=src python -m sse_sleep.build_npz_dataset \
-  --input-csv "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_epoch_features_temporal_targeted_w20.csv" \
-  --out "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_temporal_targeted_w20_lstm_context20.npz" \
-  --summary-out "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_temporal_targeted_w20_lstm_context20_summary.json" \
-  --context-epochs 20
+seed42에서 좋으면 3-seed로 확장:
 
-PYTHONPATH=src python -m sse_sleep.train_lstm \
-  --npz "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_temporal_targeted_w20_lstm_context20.npz" \
-  --out-dir "/content/drive/MyDrive/SSE_outputs/lstm_temporal_targeted_w20_context20_h64_inverse" \
-  --hidden-size 64 \
-  --dropout 0.4 \
-  --class-weight-mode inverse
+```bash
+SEEDS="42 7 123" bash scripts/run_targeted_slow_w20_colab.sh
+```
+
+narrow ablation까지 함께 비교:
+
+```bash
+VARIANTS="targeted_w20 movement_only_w20 cardio_temp_w20" bash scripts/run_targeted_slow_w20_colab.sh
 ```
 
 판단 기준:
@@ -273,6 +266,15 @@ PYTHONPATH=src python -m sse_sleep.train_lstm \
 full w20 대비 REM F1 회복
 full w20 대비 4-class Macro F1/Kappa 유지 또는 개선
 N3 F1은 full w20 평균 0.1234 근처 유지
+```
+
+결과 JSON만 따로 비교할 때:
+
+```bash
+PYTHONPATH=src python -m sse_sleep.summarize_lstm_metrics \
+  --metrics full_w20=/content/drive/MyDrive/SSE_outputs/lstm_temporal_w20_context20_h64_inverse/lstm_metrics.json \
+  --metrics targeted_w20=/content/drive/MyDrive/SSE_outputs/lstm_temporal_targeted_w20_context20_h64_inverse/lstm_metrics.json \
+  --baseline-label full_w20
 ```
 
 ### 2. Narrow ablation
