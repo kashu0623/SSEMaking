@@ -668,9 +668,11 @@ GRU: ablation 후보로 보관, 기본 채택은 보류
 
 GRU는 4-class Macro F1과 N3 F1 평균을 조금 올렸지만, 5-class/4-class Kappa가 낮고 seed42에서 크게 무너졌다. 스마트 알람 앱 기본 모델로는 아직 LSTM이 더 안전하다.
 
-### 5. 다음 실험: causal smoothing 평가
+### 5. 다음 실험 후보였던 causal smoothing 평가
 
-다음 계획은 재학습이 아니라 post-processing 평가다. 실제 앱에서는 30초마다 수면 단계가 크게 튀는 raw prediction을 그대로 쓰지 않고, 최근 몇 epoch의 예측을 causal하게 smoothing하는 것이 자연스럽다.
+업데이트: causal smoothing은 후처리 기법이므로 지금은 우선순위를 낮춘다. 현재 모델의 학습 성능, 특히 N3/REM/Wake 균형과 4-class Kappa가 아직 충분히 안정적이지 않으므로, smoothing은 나중에 앱 정책 안정화/진단용으로 다시 평가한다.
+
+원래 계획은 재학습이 아니라 post-processing 평가였다. 실제 앱에서는 30초마다 수면 단계가 크게 튀는 raw prediction을 그대로 쓰지 않고, 최근 몇 epoch의 예측을 causal하게 smoothing하는 것이 자연스럽다.
 
 평가 목적:
 
@@ -712,6 +714,29 @@ seed42, seed7, seed123
 - 모든 smoothing은 미래 epoch를 쓰지 않는 causal 방식이어야 한다.
 - subject 경계를 넘으면 안 된다.
 - 가능하면 `test_subject_ids`, `test_epoch_indices`를 같이 사용해 subject별 sequence 순서를 보존한다.
+
+### 6. 현재 우선순위: 학습 성능 개선
+
+현재 방향은 smoothing보다 학습 성능 개선이다.
+
+추가된 문서와 스크립트:
+
+```text
+docs/training_improvement_plan.md
+scripts/run_learning_improvement_colab.sh
+```
+
+`train_lstm.py`에 추가된 실험 옵션:
+
+```text
+--selection-metric
+--loss-type cross_entropy|focal
+--focal-gamma
+--label-smoothing
+--train-sampler none|weighted
+```
+
+1차 후보는 seed42에서 빠르게 필터링한 뒤 유망한 후보만 seed42/7/123으로 반복 검증한다.
 
 ## 주요 코드 파일
 

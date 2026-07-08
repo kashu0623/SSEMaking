@@ -1,0 +1,66 @@
+# Training Improvement Plan
+
+현재 기본 모델은 `LSTM temporal context20 h64 inverse 1.0x`다. Causal smoothing은 후처리 진단으로 미루고, 우선 모델 자체의 5-class/4-class 성능을 올리는 실험을 진행한다.
+
+## 기준 모델
+
+```bash
+PYTHONPATH=src python -m sse_sleep.train_lstm \
+  --npz "/content/drive/MyDrive/SSE_outputs/dreamt_100hz_temporal_lstm_context20.npz" \
+  --out-dir "/content/drive/MyDrive/SSE_outputs/lstm_temporal_context20_h64_inverse" \
+  --hidden-size 64 \
+  --dropout 0.4 \
+  --class-weight-mode inverse
+```
+
+3-seed 기준으로 LSTM 1.0x는 안정성이 GRU보다 낫고, N3 1.2x는 N3 F1을 올리지만 Wake/REM/Kappa 손실이 있었다. 다음 실험은 구조를 크게 바꾸기 전에 loss, sampler, checkpoint selection을 점검한다.
+
+## 새 학습 옵션
+
+`train_lstm.py`에 아래 옵션을 추가했다. 기본값은 기존 실험 재현과 같다.
+
+- `--selection-metric`: best checkpoint와 early stopping 기준
+  - `5_macro_f1` 기본값
+  - `4_macro_f1`
+  - `5_kappa`
+  - `4_kappa`
+  - `5_macro_f1_plus_4_kappa`
+  - `4_macro_f1_plus_4_kappa`
+- `--loss-type cross_entropy|focal`
+- `--focal-gamma`
+- `--label-smoothing`
+- `--train-sampler none|weighted`
+
+## 1차 후보 실험
+
+빠른 후보 필터링:
+
+```bash
+%cd /content/SSE
+!git pull
+!bash scripts/run_learning_improvement_colab.sh
+```
+
+처음에는 seed42만 돌린다. 유망한 후보가 나오면:
+
+```bash
+!SEEDS="42 7 123" bash scripts/run_learning_improvement_colab.sh
+```
+
+스크립트가 돌리는 후보:
+
+- `inverse_select4combo`: 학습은 그대로 두고 4-class Macro F1 + 4-class Kappa 기준으로 checkpoint 선택
+- `inverse_focal_g1`: inverse weight + focal loss gamma 1.0
+- `inverse_focal_g2`: inverse weight + focal loss gamma 2.0
+- `inverse_ls005`: inverse weight + label smoothing 0.05
+- `weighted_sampler_none_weight`: class weight 없이 minority class oversampling
+- `weighted_sampler_sqrt_weight`: sqrt weight + minority class oversampling
+
+## 판단 기준
+
+1. 3-seed 평균에서 5-class Macro F1 또는 4-class Macro F1이 baseline보다 올라야 한다.
+2. 4-class Kappa가 baseline보다 크게 낮아지면 앱 기본 모델로 채택하지 않는다.
+3. N3 F1이 좋아져도 Wake/REM F1이 크게 무너지면 Deep-aware ablation으로만 둔다.
+4. seed42 하나에서만 좋아진 후보는 채택하지 않는다.
+
+우선은 `inverse_focal_g1`, `inverse_ls005`, `weighted_sampler_sqrt_weight`가 가장 확인 가치가 높다. `weighted_sampler_none_weight`는 N3/N1 recall 진단용 성격이 강하다.

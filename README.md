@@ -111,6 +111,21 @@ PYTHONPATH=src python -m sse_sleep.train_lstm \
   --n3-weight-multiplier 1.5
 ```
 
+학습 성능 개선 후보는 [docs/training_improvement_plan.md](/Users/chan/Documents/SSE/docs/training_improvement_plan.md)에 정리되어 있습니다.
+
+```bash
+bash scripts/run_learning_improvement_colab.sh
+```
+
+재학습 후 저장된 확률 출력으로 causal smoothing을 평가합니다. 자세한 기준은 [docs/causal_smoothing_evaluation.md](/Users/chan/Documents/SSE/docs/causal_smoothing_evaluation.md)에 있습니다.
+
+```bash
+PYTHONPATH=src python -m sse_sleep.evaluate_causal_smoothing \
+  --predictions "/content/drive/MyDrive/SSE_outputs/lstm_temporal_context20_h64_inverse/lstm_predictions.npz" \
+  --out-json "/content/drive/MyDrive/SSE_outputs/lstm_temporal_context20_h64_inverse/causal_smoothing_metrics.json" \
+  --splits val test
+```
+
 그 다음 [docs/dreamt_pipeline_design.md](/Users/chan/Documents/SSE/docs/dreamt_pipeline_design.md)의 컬럼 매핑 기준에 따라 실제 파일 구조에 맞는 loader를 확정합니다.
 
 예시:

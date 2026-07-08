@@ -11,8 +11,9 @@ from typing import Any
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch import nn
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, TensorDataset, WeightedRandomSampler
 
 from .labels import STAGE5_NAMES
 from .metrics import evaluate_5_and_4
@@ -73,6 +74,31 @@ def make_loader(x: np.ndarray, y: np.ndarray, batch_size: int, shuffle: bool) ->
     return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, drop_last=False)
 
 
+def make_train_loader(
+    x: np.ndarray,
+    y: np.ndarray,
+    batch_size: int,
+    sampler_mode: str,
+) -> DataLoader:
+    dataset = TensorDataset(torch.from_numpy(x).float(), torch.from_numpy(y).long())
+    if sampler_mode == "none":
+        return DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=False)
+    if sampler_mode != "weighted":
+        raise ValueError(f"Unknown train_sampler: {sampler_mode}")
+
+    counts = np.bincount(y.astype(np.int64), minlength=len(STAGE5_NAMES)).astype(np.float32)
+    sample_weights = 1.0 / np.maximum(counts[y.astype(np.int64)], 1.0)
+    generator = torch.Generator()
+    generator.manual_seed(torch.initial_seed())
+    sampler = WeightedRandomSampler(
+        weights=torch.as_tensor(sample_weights, dtype=torch.double),
+        num_samples=int(y.shape[0]),
+        replacement=True,
+        generator=generator,
+    )
+    return DataLoader(dataset, batch_size=batch_size, sampler=sampler, drop_last=False)
+
+
 def class_weights(
     y_train: np.ndarray,
     num_classes: int,
@@ -96,6 +122,66 @@ def class_weights(
         weights[n3_index] *= n3_weight_multiplier
         weights = weights / weights.mean()
     return torch.tensor(weights, dtype=torch.float32)
+
+
+class FocalLoss(nn.Module):
+    def __init__(
+        self,
+        weight: torch.Tensor | None = None,
+        gamma: float = 2.0,
+        label_smoothing: float = 0.0,
+    ) -> None:
+        super().__init__()
+        if gamma < 0:
+            raise ValueError(f"focal gamma must be non-negative: {gamma}")
+        self.gamma = gamma
+        self.label_smoothing = label_smoothing
+        self.register_buffer("weight", weight if weight is not None else None)
+
+    def forward(self, logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        ce_loss = F.cross_entropy(
+            logits,
+            target,
+            weight=self.weight,
+            reduction="none",
+            label_smoothing=self.label_smoothing,
+        )
+        target_log_probability = F.log_softmax(logits, dim=1).gather(1, target.unsqueeze(1)).squeeze(1)
+        target_probability = target_log_probability.exp()
+        focal_factor = (1.0 - target_probability).pow(self.gamma)
+        return (focal_factor * ce_loss).mean()
+
+
+def make_criterion(
+    loss_type: str,
+    weights_for_loss: torch.Tensor | None,
+    focal_gamma: float,
+    label_smoothing: float,
+) -> nn.Module:
+    if not 0 <= label_smoothing < 1:
+        raise ValueError(f"label_smoothing must be in [0, 1): {label_smoothing}")
+    if loss_type == "cross_entropy":
+        return nn.CrossEntropyLoss(weight=weights_for_loss, label_smoothing=label_smoothing)
+    if loss_type == "focal":
+        return FocalLoss(weight=weights_for_loss, gamma=focal_gamma, label_smoothing=label_smoothing)
+    raise ValueError(f"Unknown loss_type: {loss_type}")
+
+
+def validation_score(metrics: dict[str, Any], selection_metric: str) -> float:
+    metric_map = {
+        "5_macro_f1": ("5_class", "macro_f1"),
+        "4_macro_f1": ("4_class", "macro_f1"),
+        "5_kappa": ("5_class", "cohen_kappa"),
+        "4_kappa": ("4_class", "cohen_kappa"),
+    }
+    if selection_metric in metric_map:
+        group, metric_name = metric_map[selection_metric]
+        return float(metrics[group][metric_name])
+    if selection_metric == "5_macro_f1_plus_4_kappa":
+        return float(metrics["5_class"]["macro_f1"]) + float(metrics["4_class"]["cohen_kappa"])
+    if selection_metric == "4_macro_f1_plus_4_kappa":
+        return float(metrics["4_class"]["macro_f1"]) + float(metrics["4_class"]["cohen_kappa"])
+    raise ValueError(f"Unknown selection_metric: {selection_metric}")
 
 
 def run_epoch(
@@ -149,13 +235,49 @@ def json_ready(value: Any) -> Any:
 
 
 def evaluate_loader(model: nn.Module, loader: DataLoader, criterion: nn.Module, device: torch.device) -> dict[str, Any]:
-    loss, y_true, y_pred = run_epoch(model=model, loader=loader, criterion=criterion, device=device)
+    model.eval()
+    total_loss = 0.0
+    total_count = 0
+    y_true: list[int] = []
+    y_pred: list[int] = []
+    logits_batches: list[np.ndarray] = []
+    prob_batches: list[np.ndarray] = []
+
+    for x_batch, y_batch in loader:
+        x_batch = x_batch.to(device)
+        y_batch = y_batch.to(device)
+        with torch.no_grad():
+            logits = model(x_batch)
+            loss = criterion(logits, y_batch)
+            probabilities = torch.softmax(logits, dim=1)
+
+        batch_size = y_batch.shape[0]
+        total_loss += float(loss.detach().cpu()) * batch_size
+        total_count += batch_size
+        y_true.extend(y_batch.detach().cpu().numpy().astype(int).tolist())
+        y_pred.extend(logits.argmax(dim=1).detach().cpu().numpy().astype(int).tolist())
+        logits_batches.append(logits.detach().cpu().numpy().astype(np.float32))
+        prob_batches.append(probabilities.detach().cpu().numpy().astype(np.float32))
+
+    loss = total_loss / max(total_count, 1)
     metrics = evaluate_5_and_4(y_true, y_pred)
+    logits_array = (
+        np.concatenate(logits_batches, axis=0)
+        if logits_batches
+        else np.empty((0, len(STAGE5_NAMES)), dtype=np.float32)
+    )
+    prob_array = (
+        np.concatenate(prob_batches, axis=0)
+        if prob_batches
+        else np.empty((0, len(STAGE5_NAMES)), dtype=np.float32)
+    )
     return {
         "loss": loss,
         "metrics": json_ready(metrics),
         "y_true": y_true,
         "y_pred": y_pred,
+        "logits": logits_array,
+        "probabilities": prob_array,
     }
 
 
@@ -174,6 +296,11 @@ def train_lstm(
     class_weight_mode: str,
     n3_weight_multiplier: float,
     model_type: str,
+    loss_type: str,
+    focal_gamma: float,
+    label_smoothing: float,
+    train_sampler: str,
+    selection_metric: str,
 ) -> dict[str, Any]:
     set_seed(seed)
     arrays = load_npz(npz_path)
@@ -201,17 +328,26 @@ def train_lstm(
         n3_weight_multiplier=n3_weight_multiplier,
     )
     weights_for_loss = weights.to(device) if weights is not None else None
-    criterion = nn.CrossEntropyLoss(weight=weights_for_loss)
+    criterion = make_criterion(
+        loss_type=loss_type,
+        weights_for_loss=weights_for_loss,
+        focal_gamma=focal_gamma,
+        label_smoothing=label_smoothing,
+    )
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
-    train_loader = make_loader(x_train, y_train, batch_size=batch_size, shuffle=True)
+    train_loader = make_train_loader(x_train, y_train, batch_size=batch_size, sampler_mode=train_sampler)
     val_loader = make_loader(x_val, y_val, batch_size=batch_size, shuffle=False)
     test_loader = make_loader(x_test, y_test, batch_size=batch_size, shuffle=False)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     best_model_path = out_dir / "lstm_best.pt"
     history: list[dict[str, Any]] = []
-    best_val_macro_f1 = -1.0
+    best_selection_score = -float("inf")
+    best_val_5_macro_f1 = -1.0
+    best_val_4_macro_f1 = -1.0
+    best_val_5_kappa = -1.0
+    best_val_4_kappa = -1.0
     best_epoch = -1
     epochs_without_improvement = 0
 
@@ -225,7 +361,7 @@ def train_lstm(
         )
         train_metrics = evaluate_5_and_4(train_true, train_pred)
         val_result = evaluate_loader(model=model, loader=val_loader, criterion=criterion, device=device)
-        val_macro_f1 = val_result["metrics"]["5_class"]["macro_f1"]
+        selection_score = validation_score(val_result["metrics"], selection_metric)
 
         epoch_record = {
             "epoch": epoch,
@@ -233,16 +369,23 @@ def train_lstm(
             "train_metrics": json_ready(train_metrics),
             "val_loss": val_result["loss"],
             "val_metrics": val_result["metrics"],
+            "selection_metric": selection_metric,
+            "selection_score": selection_score,
         }
         history.append(epoch_record)
         print(
             f"epoch={epoch} train_loss={train_loss:.4f} "
-            f"val_loss={val_result['loss']:.4f} val_macro_f1={val_macro_f1:.4f}",
+            f"val_loss={val_result['loss']:.4f} "
+            f"{selection_metric}={selection_score:.4f}",
             flush=True,
         )
 
-        if val_macro_f1 > best_val_macro_f1:
-            best_val_macro_f1 = val_macro_f1
+        if selection_score > best_selection_score:
+            best_selection_score = selection_score
+            best_val_5_macro_f1 = float(val_result["metrics"]["5_class"]["macro_f1"])
+            best_val_4_macro_f1 = float(val_result["metrics"]["4_class"]["macro_f1"])
+            best_val_5_kappa = float(val_result["metrics"]["5_class"]["cohen_kappa"])
+            best_val_4_kappa = float(val_result["metrics"]["4_class"]["cohen_kappa"])
             best_epoch = epoch
             epochs_without_improvement = 0
             torch.save(
@@ -255,6 +398,11 @@ def train_lstm(
                     "model_type": model_type,
                     "class_weight_mode": class_weight_mode,
                     "n3_weight_multiplier": n3_weight_multiplier,
+                    "loss_type": loss_type,
+                    "focal_gamma": focal_gamma,
+                    "label_smoothing": label_smoothing,
+                    "train_sampler": train_sampler,
+                    "selection_metric": selection_metric,
                     "feature_names": feature_names,
                     "stage5_names": STAGE5_NAMES,
                 },
@@ -289,6 +437,11 @@ def train_lstm(
             "model_type": model_type,
             "class_weight_mode": class_weight_mode,
             "n3_weight_multiplier": n3_weight_multiplier,
+            "loss_type": loss_type,
+            "focal_gamma": focal_gamma,
+            "label_smoothing": label_smoothing,
+            "train_sampler": train_sampler,
+            "selection_metric": selection_metric,
         },
         "array_shapes": {
             "X_train": list(x_train.shape),
@@ -301,7 +454,13 @@ def train_lstm(
         "n3_weight_multiplier": n3_weight_multiplier,
         "class_weights": None if weights is None else weights.detach().cpu().numpy().tolist(),
         "best_epoch": best_epoch,
-        "best_val_macro_f1": best_val_macro_f1,
+        "best_selection_metric": selection_metric,
+        "best_selection_score": best_selection_score,
+        "best_val_macro_f1": best_val_5_macro_f1,
+        "best_val_5_macro_f1": best_val_5_macro_f1,
+        "best_val_4_macro_f1": best_val_4_macro_f1,
+        "best_val_5_kappa": best_val_5_kappa,
+        "best_val_4_kappa": best_val_4_kappa,
         "history": history,
         "final_val": {
             "loss": val_final["loss"],
@@ -315,13 +474,26 @@ def train_lstm(
 
     metrics_path = out_dir / "lstm_metrics.json"
     metrics_path.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    np.savez_compressed(
-        out_dir / "lstm_predictions.npz",
-        val_y_true=np.asarray(val_final["y_true"], dtype=np.int64),
-        val_y_pred=np.asarray(val_final["y_pred"], dtype=np.int64),
-        test_y_true=np.asarray(test_final["y_true"], dtype=np.int64),
-        test_y_pred=np.asarray(test_final["y_pred"], dtype=np.int64),
-    )
+    prediction_arrays = {
+        "val_y_true": np.asarray(val_final["y_true"], dtype=np.int64),
+        "val_y_pred": np.asarray(val_final["y_pred"], dtype=np.int64),
+        "val_logits": val_final["logits"],
+        "val_probs": val_final["probabilities"],
+        "test_y_true": np.asarray(test_final["y_true"], dtype=np.int64),
+        "test_y_pred": np.asarray(test_final["y_pred"], dtype=np.int64),
+        "test_logits": test_final["logits"],
+        "test_probs": test_final["probabilities"],
+        "stage5_names": np.asarray(STAGE5_NAMES),
+    }
+    for split_name in ("val", "test"):
+        subject_key = f"{split_name}_subject_ids"
+        epoch_key = f"{split_name}_epoch_indices"
+        if subject_key in arrays:
+            prediction_arrays[subject_key] = arrays[subject_key]
+        if epoch_key in arrays:
+            prediction_arrays[epoch_key] = arrays[epoch_key]
+
+    np.savez_compressed(out_dir / "lstm_predictions.npz", **prediction_arrays)
     return report
 
 
@@ -356,6 +528,43 @@ def main() -> None:
         default=1.0,
         help="Additional multiplier for the N3 class weight after the selected class weighting mode.",
     )
+    parser.add_argument(
+        "--loss-type",
+        choices=("cross_entropy", "focal"),
+        default="cross_entropy",
+        help="Training loss. cross_entropy preserves previous experiments.",
+    )
+    parser.add_argument(
+        "--focal-gamma",
+        type=float,
+        default=2.0,
+        help="Focal loss gamma. Used only with --loss-type focal.",
+    )
+    parser.add_argument(
+        "--label-smoothing",
+        type=float,
+        default=0.0,
+        help="Label smoothing passed to cross entropy or focal loss.",
+    )
+    parser.add_argument(
+        "--train-sampler",
+        choices=("none", "weighted"),
+        default="none",
+        help="Training sampler. weighted oversamples minority classes with replacement.",
+    )
+    parser.add_argument(
+        "--selection-metric",
+        choices=(
+            "5_macro_f1",
+            "4_macro_f1",
+            "5_kappa",
+            "4_kappa",
+            "5_macro_f1_plus_4_kappa",
+            "4_macro_f1_plus_4_kappa",
+        ),
+        default="5_macro_f1",
+        help="Validation metric used for best checkpoint selection and early stopping.",
+    )
     args = parser.parse_args()
 
     report = train_lstm(
@@ -373,6 +582,11 @@ def main() -> None:
         class_weight_mode=args.class_weight_mode,
         n3_weight_multiplier=args.n3_weight_multiplier,
         model_type=args.model_type,
+        loss_type=args.loss_type,
+        focal_gamma=args.focal_gamma,
+        label_smoothing=args.label_smoothing,
+        train_sampler=args.train_sampler,
+        selection_metric=args.selection_metric,
     )
     print(json.dumps({"best_epoch": report["best_epoch"], "final_test": report["final_test"]}, indent=2, ensure_ascii=False))
 
