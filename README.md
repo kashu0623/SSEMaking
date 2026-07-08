@@ -123,6 +123,12 @@ Deep/N3 auxiliary head 실험:
 bash scripts/run_deep_aux_colab.sh
 ```
 
+Temporal long-window feature 실험:
+
+```bash
+bash scripts/run_temporal_long_window_colab.sh
+```
+
 재학습 후 저장된 확률 출력으로 causal smoothing을 평가합니다. 자세한 기준은 [docs/causal_smoothing_evaluation.md](/Users/chan/Documents/SSE/docs/causal_smoothing_evaluation.md)에 있습니다.
 
 ```bash

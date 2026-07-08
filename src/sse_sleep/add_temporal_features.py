@@ -41,13 +41,19 @@ def format_suffix(values: Sequence[int]) -> str:
     return ",".join(str(value) for value in values)
 
 
-def parse_int_list(text: str) -> tuple[int, ...]:
-    if not text:
+def parse_int_list(values: Sequence[str] | str | None) -> tuple[int, ...]:
+    if values is None:
         return ()
-    values = tuple(int(part.strip()) for part in text.split(",") if part.strip())
-    if any(value <= 0 for value in values):
+    if isinstance(values, str):
+        raw_parts = values.split(",")
+    else:
+        raw_parts = []
+        for value in values:
+            raw_parts.extend(value.split(","))
+    parsed = tuple(int(part.strip()) for part in raw_parts if part.strip())
+    if any(value <= 0 for value in parsed):
         raise ValueError("All window/lag values must be positive")
-    return values
+    return parsed
 
 
 def parse_feature_list(text: str | None) -> tuple[str, ...]:
@@ -222,15 +228,29 @@ def main() -> None:
     parser.add_argument("--base-features", default=None, help="Comma-separated feature names. Defaults to core physiological features.")
     parser.add_argument("--delta-lags", default=format_suffix(DEFAULT_DELTA_LAGS), help="Comma-separated epoch lags.")
     parser.add_argument("--rolling-windows", default=format_suffix(DEFAULT_ROLLING_WINDOWS), help="Comma-separated rolling windows.")
+    parser.add_argument(
+        "--delta-windows",
+        nargs="+",
+        default=None,
+        help="Alias for --delta-lags. Accepts space-separated or comma-separated epoch lags.",
+    )
+    parser.add_argument(
+        "--rolling-window-list",
+        nargs="+",
+        default=None,
+        help="Alias for --rolling-windows. Accepts space-separated or comma-separated rolling windows.",
+    )
     args = parser.parse_args()
+    delta_values = args.delta_windows if args.delta_windows is not None else args.delta_lags
+    rolling_values = args.rolling_window_list if args.rolling_window_list is not None else args.rolling_windows
 
     summary = add_temporal_features(
         input_csv=args.input_csv,
         out_csv=args.out_csv,
         summary_out=args.summary_out,
         base_features=parse_feature_list(args.base_features),
-        delta_lags=parse_int_list(args.delta_lags),
-        rolling_windows=parse_int_list(args.rolling_windows),
+        delta_lags=parse_int_list(delta_values),
+        rolling_windows=parse_int_list(rolling_values),
     )
     print(json.dumps(summary, indent=2, ensure_ascii=False))
 

@@ -124,6 +124,55 @@ final_test.deep_binary_from_stage_metrics
 final_test.deep_binary_aux_metrics
 ```
 
+## Temporal long-window feature 실험
+
+새 feature 종류를 만들기 전에, 기존 rolling/delta feature의 window만 길게 늘려 N3에 필요한 느린 흐름을 더 잘 잡는지 확인한다.
+
+기본 비교:
+
+```text
+w10: delta 1/3/10, rolling 3/5/10
+w20: delta 1/3/20, rolling 3/5/20
+```
+
+30초 epoch 기준:
+
+```text
+10 epoch = 5분
+20 epoch = 10분
+```
+
+seed42에서 w10/w20 빠른 비교:
+
+```bash
+%cd /content/SSE
+!git pull
+!bash scripts/run_temporal_long_window_colab.sh
+```
+
+출력 폴더:
+
+```text
+/content/drive/MyDrive/SSE_outputs/lstm_temporal_w10_context20_h64_inverse
+/content/drive/MyDrive/SSE_outputs/lstm_temporal_w20_context20_h64_inverse
+```
+
+유망한 window만 3-seed로 확장:
+
+```bash
+!SEEDS="42 7 123" VARIANTS="10" bash scripts/run_temporal_long_window_colab.sh
+```
+
+`add_temporal_features.py`는 기존 comma 형식과 Colab에서 쓰기 편한 space-separated alias를 모두 지원한다.
+
+```bash
+--delta-lags 1,3,10
+--rolling-windows 3,5,10
+
+--delta-windows 1 3 10
+--rolling-window-list 3 5 10
+```
+
 ## 판단 기준
 
 1. 3-seed 평균에서 5-class Macro F1 또는 4-class Macro F1이 baseline보다 올라야 한다.
