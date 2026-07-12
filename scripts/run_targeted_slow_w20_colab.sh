@@ -13,11 +13,14 @@ set -euo pipefail
 # Optional narrower variants:
 #   movement_only_w20: acc_vm_mean, acc_vm_activity
 #   cardio_temp_w20: hr_mean, hr_std, ibi_mean, ibi_std, temp_mean, temp_slope
+#   cardio_temp_acc_activity_w20: cardio_temp_w20 + acc_vm_activity
+#   cardio_temp_acc_mean_w20: cardio_temp_w20 + acc_vm_mean
 #
 # Examples:
 #   bash scripts/run_targeted_slow_w20_colab.sh
 #   SEEDS="42 7 123" bash scripts/run_targeted_slow_w20_colab.sh
 #   VARIANTS="targeted_w20 movement_only_w20 cardio_temp_w20" bash scripts/run_targeted_slow_w20_colab.sh
+#   VARIANTS="cardio_temp_acc_activity_w20 cardio_temp_acc_mean_w20" bash scripts/run_targeted_slow_w20_colab.sh
 
 OUTPUT_ROOT="${OUTPUT_ROOT:-/content/drive/MyDrive/SSE_outputs}"
 RAW_INPUT_CSV="${RAW_INPUT_CSV:-${OUTPUT_ROOT}/dreamt_100hz_epoch_features.csv}"
@@ -40,6 +43,12 @@ features_for_variant() {
       ;;
     cardio_temp_w20)
       echo "hr_mean,hr_std,ibi_mean,ibi_std,temp_mean,temp_slope"
+      ;;
+    cardio_temp_acc_activity_w20)
+      echo "hr_mean,hr_std,ibi_mean,ibi_std,temp_mean,temp_slope,acc_vm_activity"
+      ;;
+    cardio_temp_acc_mean_w20)
+      echo "hr_mean,hr_std,ibi_mean,ibi_std,temp_mean,temp_slope,acc_vm_mean"
       ;;
     *)
       echo "Unknown targeted w20 variant: ${variant}" >&2

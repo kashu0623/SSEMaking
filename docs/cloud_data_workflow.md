@@ -158,5 +158,5 @@ Google Cloud, AWS, Azure 같은 VM에 데이터를 올리고 학습까지 수행
 앱 탑재 전 단계:
 
 1. 최종 feature list 고정
-2. 앱 raw 입력 6종으로 재현 가능한 feature만 사용했는지 검증
+2. 앱 raw 입력 5종으로 재현 가능한 feature만 사용했는지 검증
 3. 모델을 경량화하거나 ONNX/TFLite/Core ML 변환 경로 검토

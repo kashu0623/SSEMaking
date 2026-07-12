@@ -284,6 +284,14 @@ targeted slow w20이 애매하면 long-window target을 더 좁혀 비교한다.
 ```text
 movement_only_w20: acc_vm_mean, acc_vm_activity
 cardio_temp_w20: hr_mean, hr_std, ibi_mean, ibi_std, temp_mean, temp_slope
+cardio_temp_acc_activity_w20: cardio_temp_w20 + acc_vm_activity
+cardio_temp_acc_mean_w20: cardio_temp_w20 + acc_vm_mean
+```
+
+`cardio_temp_w20` 3-seed에서 REM은 조금 회복됐지만 N3/4-class가 하락하면, ACC long-window를 하나씩만 다시 더해 N3를 살리면서 REM 손실을 줄일 수 있는지 확인한다.
+
+```bash
+VARIANTS="cardio_temp_acc_activity_w20 cardio_temp_acc_mean_w20" bash scripts/run_targeted_slow_w20_colab.sh
 ```
 
 ### 3. Causal per-night baseline feature
