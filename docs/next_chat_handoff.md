@@ -584,6 +584,30 @@ remaux_w02 결과 파일은 아직 확인되지 않았다.
 !VARIANTS="remaux_w005 remaux_w01 remaux_w02 remaux_w05" SELECTION_METRIC="4_macro_f1_plus_4_kappa" RUN_TAG="sel4combo" bash scripts/run_rem_aux_colab.sh
 ```
 
+low_aux/sel4combo 추가 seed42 결과:
+
+```text
+variant                 5 Macro  5 Kappa  4 Macro  4 Kappa  Wake    N3      REM
+remaux_w05              0.3286   0.2227   0.4008   0.2582   0.5398  0.0678  0.3568
+remaux_w05_sel4combo    0.3286   0.2227   0.4008   0.2582   0.5398  0.0678  0.3568
+remaux_w02_sel4combo    0.2860   0.1558   0.3645   0.2102   0.4630  0.0121  0.2953
+remaux_w01_sel4combo    0.2782   0.1395   0.3518   0.1837   0.4359  0.0330  0.2531
+remaux_w005_sel4combo   0.3088   0.1583   0.3959   0.2181   0.4732  0.1329  0.3046
+deeprem_w01_low_aux     0.2856   0.1534   0.3568   0.1904   0.4458  0.0203  0.2919
+remaux_w02_low_aux      0.3147   0.2177   0.3816   0.2442   0.5299  0.0283  0.3493
+remaux_w01_low_aux      0.2987   0.1422   0.3837   0.2068   0.4404  0.1095  0.2843
+remaux_w005_low_aux     0.2991   0.1807   0.3829   0.2400   0.4893  0.0295  0.3506
+```
+
+결론:
+
+```text
+REM auxiliary / deep_rem multi-task 계열은 3-seed 확장하지 않는다.
+remaux_w05는 4 Kappa/Wake만 개선되고 N3/REM이 baseline보다 낮다.
+remaux_w005_sel4combo와 remaux_w01_low_aux는 N3를 살리지만 REM/4-class가 낮다.
+학습 loss/threshold/distillation/pseudo-label 계열에서 single-model 대안을 찾지 못했으므로, 다음은 capacity 조정을 seed42로 확인한다.
+```
+
 #### 4. Temporal policy post-processing
 
 모델 성능 자체가 아니라 앱 출력 정책으로 REM/N3 안정성을 개선한다. 이미 prediction probabilities가 있으므로 causal policy를 다시 평가할 수 있다.
@@ -607,6 +631,20 @@ feature/loss 실험보다 비용이 크므로 후순위로 둔다.
 full w20 h96 또는 h128 재확인
 2-layer LSTM small dropout
 TCN/GRU 재비교는 필요할 때만
+```
+
+구현:
+
+```text
+scripts/run_full_w20_capacity_colab.sh
+```
+
+Colab seed42 실행:
+
+```bash
+%cd /content/SSE
+!git pull
+!bash scripts/run_full_w20_capacity_colab.sh
 ```
 
 우선순위 결론:
