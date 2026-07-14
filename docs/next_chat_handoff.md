@@ -2,6 +2,189 @@
 
 이 문서는 DreamT 기반 수면 단계 예측 모델 개발을 다음 채팅방에서 이어가기 위한 요약이다.
 
+## 최신 상태 요약: 2026-07-14
+
+아래 2026-07-08 섹션은 과거 진행 로그로 보존한다. 다음 채팅방은 이 2026-07-14 섹션을 우선 기준으로 이어가면 된다.
+
+현재 앱/4-class 관점 best 후보는 계속 아래 모델이다.
+
+```text
+full w20 = temporal_w20 context20 h64 inverse 1.0x
+```
+
+구성:
+
+- epoch feature CSV: `dreamt_100hz_epoch_features_temporal_w20.csv`
+- temporal transform:
+  - delta lags: `1, 3, 20`
+  - rolling windows: `3, 5, 20`
+- feature count: `157`
+- sequence context: `20` epochs
+- model: 1-layer LSTM
+- hidden size: `64`
+- dropout: `0.4`
+- class weight: `inverse`
+- N3 weight multiplier: `1.0`
+- loss: cross entropy
+
+3-seed 평균 기준 baseline:
+
+```text
+                 original temporal   full w20
+5-class Macro F1 0.3224              0.3266
+5-class Kappa    0.2086              0.2022
+4-class Macro F1 0.3881              0.4001
+4-class Kappa    0.2273              0.2365
+Wake F1          0.4966              0.5011
+N3 F1            0.0833              0.1234
+REM F1           0.3650              0.3433
+```
+
+판단:
+
+```text
+유지 best: full w20 = temporal_w20 context20 h64 inverse 1.0x
+장점: original temporal 대비 4-class Macro F1/Kappa와 N3 F1 개선
+약점: REM F1 하락, 5-class Kappa 소폭 하락
+```
+
+### 완료된 targeted/long-window ablation 결론
+
+w20의 N3/4-class 이득을 유지하면서 REM 하락을 줄이기 위해 long-window 대상 feature를 줄이는 실험을 진행했다. 결론적으로 모두 full w20을 넘지 못했다.
+
+3-seed 평균:
+
+```text
+variant                          5 Macro  5 Kappa  4 Macro  4 Kappa  Wake    N3      REM
+full w20                         0.3266   0.2022   0.4001   0.2365   0.5011  0.1234  0.3433
+targeted_w20                     0.3256   0.2082   0.3955   0.2390   0.5110  0.0864  0.3238
+cardio_temp_w20                  0.3115   0.1862   0.3895   0.2273   0.5011  0.0809  0.3465
+cardio_temp_acc_activity_w20     0.3147   0.1948   0.3795   0.2117   0.5091  0.0738  0.3251
+```
+
+Seed42에서만 확인 후 탈락:
+
+```text
+movement_only_w20: N3/REM/4-class 모두 낮아 탈락
+cardio_temp_acc_mean_w20: REM, 4-class, Kappa 모두 낮아 탈락
+```
+
+요약:
+
+```text
+targeted_w20은 seed42에서는 유망했지만 seed7/123에서 N3/REM 안정성이 낮았다.
+cardio_temp_w20은 REM을 조금 회복했지만 N3/4-class 이득을 잃었다.
+ACC activity를 하나만 되돌린 조합도 3-seed에서 실패했다.
+따라서 full w20을 계속 best로 유지한다.
+```
+
+### 완료된 causal per-night baseline 실험 결론
+
+long-window ablation 이후, original short temporal CSV 위에 prior-only expanding baseline feature를 추가하는 실험을 시작했다. 이 실험은 후처리가 아니라 feature engineering이다.
+
+구현/스크립트:
+
+```text
+src/sse_sleep/add_causal_baseline_features.py
+scripts/run_causal_baseline_colab.sh
+```
+
+feature 생성 방식:
+
+```text
+feature_expanding_mean
+feature_expanding_std
+feature_causal_zscore
+```
+
+중요 조건:
+
+```text
+현재 epoch 이전 history만 사용한다.
+subject_id + source_file 단위로 history를 분리한다.
+aligned_epoch_index가 끊기면 history를 reset한다.
+미래 epoch나 test subject 통계를 쓰지 않는다.
+앱에서도 online update 가능해야 한다.
+```
+
+Seed42 결과:
+
+```text
+variant                          5 Macro  5 Kappa  4 Macro  4 Kappa  Wake    N3      REM
+temporal_baseline                0.3189   0.1737   0.3972   0.2195   0.4411  0.0925  0.4057
+cardio_baseline                  0.3227   0.1790   0.3964   0.2094   0.4263  0.1721  0.3089
+cardio_temp_baseline             0.3070   0.1863   0.3813   0.2338   0.4603  0.0420  0.3518
+movement_cardio_temp_baseline    0.3219   0.2105   0.3918   0.2498   0.4926  0.0275  0.3824
+```
+
+해석:
+
+```text
+temporal_baseline: REM은 매우 좋지만 Wake/Kappa/N3 약함
+cardio_baseline: N3는 좋지만 REM/Wake/Kappa 약함
+cardio_temp_baseline: REM/Wake/Kappa 일부 회복, N3 붕괴
+movement_cardio_temp_baseline: REM/Wake/Kappa 좋지만 N3가 거의 붕괴
+```
+
+현재 causal baseline 후보 중 3-seed 확장할 모델은 아직 없다.
+
+### 다음 채팅방 우선 작업
+
+다음은 `bvp_std` causal baseline의 역할을 분리해서 확인한다. 아직 스크립트에 아래 variant들은 추가되어 있지 않으므로, 먼저 `scripts/run_causal_baseline_colab.sh`의 `features_for_variant`와 `input_csv_for_variant`에 variant를 추가해야 한다.
+
+우선 추가/실행할 variant:
+
+```text
+bvp_baseline:
+bvp_std
+
+bvp_cardio_baseline:
+bvp_std, hr_mean, ibi_mean
+
+bvp_temp_baseline:
+bvp_std, temp_mean
+```
+
+권장 순서:
+
+```text
+1. bvp_baseline seed42
+2. bvp_cardio_baseline seed42
+3. bvp_temp_baseline seed42
+4. seed42에서 REM/Wake/Kappa와 N3 균형이 가장 나은 후보만 3-seed 확장
+```
+
+Colab 예상 실행 형태:
+
+```bash
+%cd /content/SSE
+!git pull
+!VARIANTS="bvp_baseline bvp_cardio_baseline bvp_temp_baseline" bash scripts/run_causal_baseline_colab.sh
+```
+
+판단 기준:
+
+```text
+full w20 3-seed 기준:
+4-class Macro F1 0.4001
+4-class Kappa    0.2365
+N3 F1            0.1234
+REM F1           0.3433
+
+original temporal 3-seed 기준:
+REM F1           0.3650
+N3 F1            0.0833
+```
+
+목표:
+
+```text
+REM F1은 full w20보다 회복하고, 가능하면 original temporal 0.3650 근처로 접근
+N3 F1은 original temporal 0.0833 이상, 가능하면 full w20 0.1234 근처 유지
+4-class Macro F1/Kappa는 full w20 근처를 유지
+Wake F1이 temporal_baseline처럼 크게 무너지면 채택하지 않음
+```
+
 ## 최신 상태 요약: 2026-07-08
 
 현재 새 best 후보는 기존 `lstm_temporal_context20_h64_inverse`가 아니라 아래 모델이다.
@@ -968,6 +1151,7 @@ scripts/run_learning_improvement_colab.sh
 ```text
 이전 채팅방에서 DreamT data_100Hz 기반 수면 단계 예측 파이프라인을 여기까지 진행했다.
 docs/next_chat_handoff.md 내용을 읽고 이어서 진행해줘.
-현재 앱/4-class 관점 best 후보는 temporal w20 context20 h64 inverse다.
-다음 작업은 w20의 REM F1 하락을 줄이기 위한 targeted slow w20 feature 실험부터 진행해줘.
+현재 앱/4-class 관점 best 후보는 full w20 = temporal_w20 context20 h64 inverse 1.0x다.
+targeted/long-window ablation과 causal baseline 일부 실험은 완료했고 모두 full w20을 넘지 못했다.
+다음 작업은 causal per-night baseline에서 bvp_std 역할을 분리하기 위해 bvp_baseline, bvp_cardio_baseline, bvp_temp_baseline variant를 추가하고 seed42부터 진행해줘.
 ```
