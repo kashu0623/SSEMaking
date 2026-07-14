@@ -9,6 +9,7 @@ CONTEXT_EPOCHS="${CONTEXT_EPOCHS:-20}"
 HIDDEN_SIZE="${HIDDEN_SIZE:-64}"
 SEEDS=(${SEEDS:-42})
 PYTHON_BIN="${PYTHON_BIN:-python}"
+fusion_reports=()
 
 prediction_path_for_seed() {
   local model_prefix="$1"
@@ -110,6 +111,14 @@ for seed in "${SEEDS[@]}"; do
     --candidate-predictions "${w20_predictions}" \
     --out-json "${out_json}" \
     --selection-metric 4_macro_f1_plus_4_kappa
+  fusion_reports+=("${out_json}")
 done
+
+if [[ "${#fusion_reports[@]}" -gt 1 ]]; then
+  echo "=== Summarize fixed fusion weights across seeds ==="
+  PYTHONPATH=src "${PYTHON_BIN}" -m sse_sleep.summarize_prediction_fusion \
+    --reports "${fusion_reports[@]}" \
+    --out-json "${OUTPUT_ROOT}/fusion_original_temporal_full_w20_context${CONTEXT_EPOCHS}_h${HIDDEN_SIZE}_summary.json"
+fi
 
 echo "=== Prediction fusion evaluation complete ==="

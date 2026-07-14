@@ -272,6 +272,26 @@ REM과 4-class는 full w20보다 개선되고, N3는 full w20보다는 낮지만
 3-seed 확장 가치가 있다.
 ```
 
+3-seed 결과, 각 seed별 validation-selected top1 기준:
+
+```text
+seed  selected                         4 Macro  4 Kappa  Wake    N3      REM
+42    classwise_nonrem1.00_rem0.60     0.4106   0.2515   0.5025  0.1040  0.3846
+7     classwise_nonrem0.80_rem0.20     0.4081   0.2290   0.4606  0.1647  0.3641
+123   classwise_nonrem1.00_rem0.30     0.3928   0.2377   0.5463  0.0722  0.3476
+mean                                  0.4038   0.2394   0.5031  0.1136  0.3654
+```
+
+판단:
+
+```text
+앱/4-class 관점에서는 full w20보다 낫다.
+REM은 original temporal 평균 0.3650 수준까지 회복된다.
+N3는 full w20보다 낮아지지만 original temporal보다 높게 유지된다.
+다음은 seed별 best가 아니라 동일한 classwise weight 고정 시 3-seed 평균을 확인한다.
+`scripts/run_prediction_fusion_colab.sh`는 여러 seed 실행 시 고정 weight별 평균 요약을 자동 출력하고 `/content/drive/MyDrive/SSE_outputs/fusion_original_temporal_full_w20_context20_h64_summary.json`에 저장한다.
+```
+
 ### 0.5. Full w20 후속 학습 후보
 
 Fusion에서 상보성이 보이면 full w20 단일 모델 쪽 후속 후보를 seed42로 확인한다.

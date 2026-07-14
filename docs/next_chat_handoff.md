@@ -204,6 +204,27 @@ classwise_nonrem1.00_rem0.20~0.40은 test REM/4-class가 더 좋아 보이지만
 SEEDS="42 7 123" bash scripts/run_prediction_fusion_colab.sh
 ```
 
+3-seed fusion 결과, 각 seed별 validation-selected top1 기준:
+
+```text
+seed  selected                         4 Macro  4 Kappa  Wake    N3      REM
+42    classwise_nonrem1.00_rem0.60     0.4106   0.2515   0.5025  0.1040  0.3846
+7     classwise_nonrem0.80_rem0.20     0.4081   0.2290   0.4606  0.1647  0.3641
+123   classwise_nonrem1.00_rem0.30     0.3928   0.2377   0.5463  0.0722  0.3476
+mean                                  0.4038   0.2394   0.5031  0.1136  0.3654
+```
+
+해석:
+
+```text
+validation-selected fusion은 full w20 3-seed 평균 대비 4-class Macro/Kappa, Wake, REM을 개선한다.
+N3는 full w20 0.1234보다 낮지만 original temporal 0.0833보다 높다.
+앱/4-class 관점에서는 fusion이 새 best 후보로 볼 만하다.
+다만 seed별 selected weight가 다르므로, 다음은 JSON 결과에서 동일한 classwise weight를 3-seed로 고정했을 때의 평균을 확인한다.
+`scripts/run_prediction_fusion_colab.sh`는 여러 seed 실행 시 고정 weight별 평균 요약을 자동 출력하고 아래 JSON을 저장한다.
+`/content/drive/MyDrive/SSE_outputs/fusion_original_temporal_full_w20_context20_h64_summary.json`
+```
+
 판단 기준:
 
 ```text
