@@ -2,8 +2,18 @@
 set -euo pipefail
 
 # Build and train causal per-night baseline feature experiments.
-# The default "temporal_baseline" variant starts from the original short
-# temporal CSV and adds prior-only expanding mean/std/z-score features.
+# Variants start from temporal feature CSVs and add prior-only expanding
+# mean/std/z-score features.
+#
+# Variants:
+#   temporal_baseline: acc_vm_activity, hr_mean, ibi_mean, temp_mean, bvp_std
+#   cardio_baseline: hr_mean, ibi_mean
+#   temporal_w20_baseline: full w20 CSV + temporal_baseline feature set
+#
+# Examples:
+#   bash scripts/run_causal_baseline_colab.sh
+#   VARIANTS="cardio_baseline" bash scripts/run_causal_baseline_colab.sh
+#   SEEDS="42 7 123" VARIANTS="cardio_baseline" bash scripts/run_causal_baseline_colab.sh
 
 OUTPUT_ROOT="${OUTPUT_ROOT:-/content/drive/MyDrive/SSE_outputs}"
 RAW_INPUT_CSV="${RAW_INPUT_CSV:-${OUTPUT_ROOT}/dreamt_100hz_epoch_features.csv}"
@@ -14,12 +24,27 @@ HIDDEN_SIZE="${HIDDEN_SIZE:-64}"
 DROPOUT="${DROPOUT:-0.4}"
 SEEDS=(${SEEDS:-42})
 VARIANTS=(${VARIANTS:-temporal_baseline})
-BASELINE_FEATURES="${BASELINE_FEATURES:-acc_vm_activity,hr_mean,ibi_mean,temp_mean,bvp_std}"
+
+features_for_variant() {
+  local variant="$1"
+  case "${variant}" in
+    temporal_baseline | temporal_w20_baseline)
+      echo "acc_vm_activity,hr_mean,ibi_mean,temp_mean,bvp_std"
+      ;;
+    cardio_baseline)
+      echo "hr_mean,ibi_mean"
+      ;;
+    *)
+      echo "Unknown causal baseline variant: ${variant}" >&2
+      return 1
+      ;;
+  esac
+}
 
 input_csv_for_variant() {
   local variant="$1"
   case "${variant}" in
-    temporal_baseline)
+    temporal_baseline | cardio_baseline)
       echo "${SHORT_TEMPORAL_CSV}"
       ;;
     temporal_w20_baseline)
@@ -45,7 +70,9 @@ build_short_temporal_csv() {
 
 build_variant_csv() {
   local variant="$1"
+  local base_features
   local input_csv
+  base_features="$(features_for_variant "${variant}")"
   input_csv="$(input_csv_for_variant "${variant}")"
   local out_csv="${OUTPUT_ROOT}/dreamt_100hz_epoch_features_${variant}.csv"
   local summary_path="${OUTPUT_ROOT}/dreamt_100hz_${variant}_features_summary.json"
@@ -61,7 +88,7 @@ build_variant_csv() {
       --input-csv "${input_csv}" \
       --out-csv "${out_csv}" \
       --summary-out "${summary_path}" \
-      --base-features "${BASELINE_FEATURES}"
+      --base-features "${base_features}"
   fi
 }
 
