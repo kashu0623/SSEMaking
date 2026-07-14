@@ -173,6 +173,37 @@ scripts/run_temporal_long_window_colab.sh  # VARIANTS="15"로 w15 실행
 !VARIANTS="15" bash scripts/run_temporal_long_window_colab.sh
 ```
 
+Seed42 fusion 결과:
+
+```text
+output JSON:
+/content/drive/MyDrive/SSE_outputs/fusion_original_temporal_full_w20_context20_h64.json
+
+validation 기준 best:
+classwise_nonrem1.00_rem0.60
+
+test 지표:
+4 Macro 0.4106
+4 Kappa 0.2515
+Wake    0.5025
+N3      0.1040
+REM     0.3846
+```
+
+해석:
+
+```text
+full w20 3-seed 평균 대비 4-class Macro/Kappa와 REM은 개선되고 Wake는 유지된다.
+N3는 full w20 평균 0.1234보다는 낮지만 original temporal 평균 0.0833보다는 높다.
+classwise_nonrem1.00_rem0.20~0.40은 test REM/4-class가 더 좋아 보이지만 validation score 기준 선택은 nonrem1.00/rem0.60이므로, 우선 validation-selected 설정을 3-seed로 확장한다.
+```
+
+다음 권장 실행:
+
+```bash
+SEEDS="42 7 123" bash scripts/run_prediction_fusion_colab.sh
+```
+
 판단 기준:
 
 ```text

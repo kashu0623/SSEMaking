@@ -258,6 +258,20 @@ test는 선택된 weight의 일반화 확인용으로만 본다.
 full w20 대비 4-class Macro/Kappa와 N3를 유지하면서 REM이 회복되면 다음은 single-model distillation 또는 REM-preserving 학습으로 간다.
 ```
 
+Seed42 결과:
+
+```text
+best by validation: classwise_nonrem1.00_rem0.60
+test: 4 Macro 0.4106, 4 Kappa 0.2515, Wake 0.5025, N3 0.1040, REM 0.3846
+```
+
+판단:
+
+```text
+REM과 4-class는 full w20보다 개선되고, N3는 full w20보다는 낮지만 original temporal보다는 높다.
+3-seed 확장 가치가 있다.
+```
+
 ### 0.5. Full w20 후속 학습 후보
 
 Fusion에서 상보성이 보이면 full w20 단일 모델 쪽 후속 후보를 seed42로 확인한다.
