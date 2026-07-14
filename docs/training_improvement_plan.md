@@ -350,12 +350,41 @@ longdrop_p10: *_20 long-window feature train-time dropout p=0.10
 --feature-dropout-prob
 ```
 
+Seed42 결과:
+
+```text
+variant       5 Macro  5 Kappa  4 Macro  4 Kappa  Wake    N3      REM
+ls005         0.3026   0.1659   0.3765   0.1985   0.4276  0.0736  0.3269
+remx11        0.3175   0.2037   0.3877   0.2364   0.4933  0.0417  0.3720
+longdrop_p10  0.2945   0.1809   0.3687   0.2251   0.4854  0.0056  0.3332
+```
+
+판단:
+
+```text
+세 후보 모두 seed42 탈락.
+remx11은 REM을 회복하지만 N3가 크게 무너진다.
+ls005와 longdrop_p10은 4-class/REM/N3 균형이 모두 fixed fusion 및 full w20보다 약하다.
+```
+
 ### 0.75. w15 중간 long-window
 
 w10은 탈락, w20은 현재 best, w30은 탈락했으므로 중간점인 w15를 seed42로 확인한다.
 
 ```bash
 !VARIANTS="15" bash scripts/run_temporal_long_window_colab.sh
+```
+
+Seed42 결과:
+
+```text
+w15: 5 Macro 0.2979, 5 Kappa 0.1689, 4 Macro 0.3652, 4 Kappa 0.1923, Wake 0.4511, N3 0.0458, REM 0.2999
+```
+
+판단:
+
+```text
+w15도 seed42 탈락.
 ```
 
 ### 1. Targeted slow w20
