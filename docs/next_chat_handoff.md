@@ -514,6 +514,48 @@ test를 보고 threshold를 고르면 안 된다.
 validation에서 threshold/calibration을 선택하고 test는 한 번만 확인한다.
 ```
 
+#### 3-1. REM auxiliary / Deep+REM multi-task
+
+full w20 REM threshold가 실패했으므로, 다음은 학습 단계에서 REM-vs-rest 보조 head를 붙인다. N3 보존을 같이 보려면 Deep/N3 보조 head와 REM 보조 head를 동시에 붙인 `deep_rem` multi-task를 확인한다.
+
+구현:
+
+```text
+src/sse_sleep/train_lstm.py
+  --aux-head rem
+  --aux-head deep_rem
+
+scripts/run_rem_aux_colab.sh
+```
+
+seed42 실행:
+
+```bash
+%cd /content/SSE
+!git pull
+!bash scripts/run_rem_aux_colab.sh
+```
+
+기본 후보:
+
+```text
+remaux_w02:   stage CE + 0.2 * REM binary BCE
+remaux_w05:   stage CE + 0.5 * REM binary BCE
+deeprem_w02:  stage CE + 0.2 * (N3 binary BCE + REM binary BCE)
+deeprem_w05:  stage CE + 0.5 * (N3 binary BCE + REM binary BCE)
+```
+
+판정:
+
+```text
+full w20 seed42 baseline:
+4 Macro 0.4036 / 4 Kappa 0.2401 / Wake 0.5011 / N3 0.1043 / REM 0.3646
+
+REM이 baseline 이상으로 오르면서 N3가 original temporal 평균 0.0833 이상이면 3-seed 확장 후보.
+REM만 오르고 N3가 pseudo-label처럼 0.05 이하로 무너지면 중단.
+4-class Macro/Kappa가 baseline보다 크게 낮으면 앱 후보로는 탈락.
+```
+
 #### 4. Temporal policy post-processing
 
 모델 성능 자체가 아니라 앱 출력 정책으로 REM/N3 안정성을 개선한다. 이미 prediction probabilities가 있으므로 causal policy를 다시 평가할 수 있다.

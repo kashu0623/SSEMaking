@@ -55,12 +55,14 @@ def checkpoint_value(checkpoint: dict[str, Any], key: str, default: Any) -> Any:
 
 def normalize_state_dict_keys(state_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
     """Support checkpoints saved before the recurrent module was renamed."""
-    if any(key.startswith("recurrent.") for key in state_dict):
-        return state_dict
-    return {
-        key.replace("lstm.", "recurrent.", 1) if key.startswith("lstm.") else key: value
-        for key, value in state_dict.items()
-    }
+    normalized: dict[str, torch.Tensor] = {}
+    for key, value in state_dict.items():
+        if key.startswith("lstm."):
+            key = key.replace("lstm.", "recurrent.", 1)
+        if key.startswith("deep_head."):
+            key = key.replace("deep_head.", "aux_heads.deep.", 1)
+        normalized[key] = value
+    return normalized
 
 
 def export_lstm_predictions(

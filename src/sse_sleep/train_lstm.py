@@ -20,6 +20,22 @@ from .metrics import evaluate, evaluate_5_and_4
 
 
 DEEP_BINARY_NAMES = ("not_N3", "N3")
+REM_BINARY_NAMES = ("not_REM", "REM")
+AUX_HEAD_TARGETS = {
+    "none": (),
+    "deep": ("deep",),
+    "rem": ("rem",),
+    "deep_rem": ("deep", "rem"),
+}
+AUX_TARGETS_FOR_OUTPUT = ("deep", "rem")
+AUX_TARGET_STAGE = {
+    "deep": "N3",
+    "rem": "REM",
+}
+AUX_TARGET_NAMES = {
+    "deep": DEEP_BINARY_NAMES,
+    "rem": REM_BINARY_NAMES,
+}
 
 
 class RecurrentSleepClassifier(nn.Module):
@@ -34,7 +50,7 @@ class RecurrentSleepClassifier(nn.Module):
         aux_head: str = "none",
     ) -> None:
         super().__init__()
-        if aux_head not in {"none", "deep"}:
+        if aux_head not in AUX_HEAD_TARGETS:
             raise ValueError(f"Unknown aux_head: {aux_head}")
         self.aux_head = aux_head
         lstm_dropout = dropout if num_layers > 1 else 0.0
@@ -56,22 +72,23 @@ class RecurrentSleepClassifier(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(hidden_size, num_classes),
         )
-        self.deep_head = (
-            nn.Sequential(
-                nn.LayerNorm(hidden_size),
-                nn.Dropout(dropout),
-                nn.Linear(hidden_size, 1),
-            )
-            if aux_head == "deep"
-            else None
+        self.aux_heads = nn.ModuleDict(
+            {
+                target: nn.Sequential(
+                    nn.LayerNorm(hidden_size),
+                    nn.Dropout(dropout),
+                    nn.Linear(hidden_size, 1),
+                )
+                for target in AUX_HEAD_TARGETS[aux_head]
+            }
         )
 
     def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
         output, _ = self.recurrent(x)
         latest = output[:, -1, :]
         outputs = {"stage_logits": self.head(latest)}
-        if self.deep_head is not None:
-            outputs["deep_logits"] = self.deep_head(latest).squeeze(1)
+        for target, head in self.aux_heads.items():
+            outputs[f"{target}_logits"] = head(latest).squeeze(1)
         return outputs
 
 
@@ -197,18 +214,19 @@ def make_criterion(
     raise ValueError(f"Unknown loss_type: {loss_type}")
 
 
-def make_deep_aux_criterion(
+def make_binary_aux_criterion(
     y_train: np.ndarray,
     device: torch.device,
     pos_weight_mode: str,
+    target_stage: str,
 ) -> nn.Module:
     if pos_weight_mode == "none":
         return nn.BCEWithLogitsLoss()
     if pos_weight_mode != "balanced":
-        raise ValueError(f"Unknown aux_deep_pos_weight_mode: {pos_weight_mode}")
+        raise ValueError(f"Unknown auxiliary pos_weight_mode: {pos_weight_mode}")
 
-    n3_index = STAGE5_NAMES.index("N3")
-    positives = float(np.sum(y_train == n3_index))
+    target_index = STAGE5_NAMES.index(target_stage)
+    positives = float(np.sum(y_train == target_index))
     negatives = float(y_train.shape[0] - positives)
     if positives <= 0:
         pos_weight = torch.tensor([1.0], dtype=torch.float32, device=device)
@@ -217,17 +235,49 @@ def make_deep_aux_criterion(
     return nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
 
-def deep_binary_labels(y_true_5: list[int]) -> list[int]:
-    n3_index = STAGE5_NAMES.index("N3")
-    return [1 if label == n3_index else 0 for label in y_true_5]
+def make_aux_criteria(
+    y_train: np.ndarray,
+    device: torch.device,
+    aux_head: str,
+    aux_weight: float,
+    pos_weight_mode: str,
+) -> dict[str, nn.Module]:
+    if aux_weight <= 0:
+        return {}
+    return {
+        target: make_binary_aux_criterion(
+            y_train,
+            device=device,
+            pos_weight_mode=pos_weight_mode,
+            target_stage=AUX_TARGET_STAGE[target],
+        )
+        for target in AUX_HEAD_TARGETS[aux_head]
+    }
+
+
+def binary_labels(y_true_5: list[int], target_stage: str) -> list[int]:
+    target_index = STAGE5_NAMES.index(target_stage)
+    return [1 if label == target_index else 0 for label in y_true_5]
+
+
+def aux_binary_labels(y_true_5: list[int], target: str) -> list[int]:
+    return binary_labels(y_true_5, AUX_TARGET_STAGE[target])
 
 
 def evaluate_deep_binary(y_true_5: list[int], y_pred_binary: list[int]) -> dict[str, Any]:
-    return json_ready(evaluate(deep_binary_labels(y_true_5), y_pred_binary, DEEP_BINARY_NAMES))
+    return evaluate_aux_binary(y_true_5, y_pred_binary, "deep")
+
+
+def evaluate_aux_binary(y_true_5: list[int], y_pred_binary: list[int], target: str) -> dict[str, Any]:
+    return json_ready(evaluate(aux_binary_labels(y_true_5, target), y_pred_binary, AUX_TARGET_NAMES[target]))
 
 
 def deep_predictions_from_stage(y_pred_5: list[int]) -> list[int]:
-    return deep_binary_labels(y_pred_5)
+    return aux_predictions_from_stage(y_pred_5, "deep")
+
+
+def aux_predictions_from_stage(y_pred_5: list[int], target: str) -> list[int]:
+    return aux_binary_labels(y_pred_5, target)
 
 
 def validation_score(metrics: dict[str, Any], selection_metric: str) -> float:
@@ -252,7 +302,7 @@ def run_epoch(
     loader: DataLoader,
     stage_criterion: nn.Module,
     device: torch.device,
-    aux_criterion: nn.Module | None = None,
+    aux_criteria: dict[str, nn.Module] | None = None,
     aux_weight: float = 0.0,
     optimizer: torch.optim.Optimizer | None = None,
     feature_dropout_indices: torch.Tensor | None = None,
@@ -271,7 +321,7 @@ def run_epoch(
     total_count = 0
     y_true: list[int] = []
     y_pred: list[int] = []
-    deep_y_pred: list[int] = []
+    aux_y_pred: dict[str, list[int]] = {target: [] for target in (aux_criteria or {})}
 
     for batch in loader:
         x_batch = batch[0]
@@ -321,10 +371,14 @@ def run_epoch(
                 else:
                     raise ValueError(f"Unknown teacher_hard_mode: {teacher_hard_mode}")
                 loss = loss + teacher_hard_weight * teacher_hard_loss
-            if aux_criterion is not None and "deep_logits" in outputs and aux_weight > 0:
-                deep_target = (y_batch == STAGE5_NAMES.index("N3")).float()
-                aux_loss = aux_criterion(outputs["deep_logits"], deep_target)
-                loss = loss + aux_weight * aux_loss
+            if aux_criteria and aux_weight > 0:
+                aux_losses = []
+                for target, criterion in aux_criteria.items():
+                    binary_target = (y_batch == STAGE5_NAMES.index(AUX_TARGET_STAGE[target])).float()
+                    aux_losses.append(criterion(outputs[f"{target}_logits"], binary_target))
+                if aux_losses:
+                    aux_loss = torch.stack(aux_losses).sum()
+                    loss = loss + aux_weight * aux_loss
             if training:
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
@@ -342,20 +396,23 @@ def run_epoch(
         total_count += batch_size
         y_true.extend(y_batch.detach().cpu().numpy().astype(int).tolist())
         y_pred.extend(logits.argmax(dim=1).detach().cpu().numpy().astype(int).tolist())
-        if "deep_logits" in outputs:
-            deep_y_pred.extend((torch.sigmoid(outputs["deep_logits"]) >= 0.5).detach().cpu().numpy().astype(int).tolist())
+        for target in aux_y_pred:
+            aux_y_pred[target].extend(
+                (torch.sigmoid(outputs[f"{target}_logits"]) >= 0.5).detach().cpu().numpy().astype(int).tolist()
+            )
 
     result: dict[str, Any] = {
         "loss": total_loss / max(total_count, 1),
         "stage_loss": total_stage_loss / max(total_count, 1),
-        "aux_loss": total_aux_loss / max(total_count, 1) if aux_criterion is not None and aux_weight > 0 else None,
+        "aux_loss": total_aux_loss / max(total_count, 1) if aux_criteria and aux_weight > 0 else None,
         "distill_loss": total_distill_loss / max(total_count, 1) if distill_weight > 0 else None,
         "teacher_hard_loss": total_teacher_hard_loss / max(total_count, 1) if teacher_hard_weight > 0 else None,
         "y_true": y_true,
         "y_pred": y_pred,
     }
-    if deep_y_pred:
-        result["deep_y_pred"] = deep_y_pred
+    for target, predictions in aux_y_pred.items():
+        if predictions:
+            result[f"{target}_y_pred"] = predictions
     return result
 
 
@@ -378,7 +435,7 @@ def evaluate_loader(
     loader: DataLoader,
     stage_criterion: nn.Module,
     device: torch.device,
-    aux_criterion: nn.Module | None = None,
+    aux_criteria: dict[str, nn.Module] | None = None,
     aux_weight: float = 0.0,
 ) -> dict[str, Any]:
     model.eval()
@@ -388,11 +445,11 @@ def evaluate_loader(
     total_count = 0
     y_true: list[int] = []
     y_pred: list[int] = []
-    deep_y_pred: list[int] = []
+    aux_y_pred: dict[str, list[int]] = {target: [] for target in (aux_criteria or {})}
     logits_batches: list[np.ndarray] = []
     prob_batches: list[np.ndarray] = []
-    deep_logit_batches: list[np.ndarray] = []
-    deep_prob_batches: list[np.ndarray] = []
+    aux_logit_batches: dict[str, list[np.ndarray]] = {target: [] for target in (aux_criteria or {})}
+    aux_prob_batches: dict[str, list[np.ndarray]] = {target: [] for target in (aux_criteria or {})}
 
     for x_batch, y_batch in loader:
         x_batch = x_batch.to(device)
@@ -403,10 +460,14 @@ def evaluate_loader(
             stage_loss = stage_criterion(logits, y_batch)
             loss = stage_loss
             aux_loss = None
-            if aux_criterion is not None and "deep_logits" in outputs and aux_weight > 0:
-                deep_target = (y_batch == STAGE5_NAMES.index("N3")).float()
-                aux_loss = aux_criterion(outputs["deep_logits"], deep_target)
-                loss = loss + aux_weight * aux_loss
+            if aux_criteria and aux_weight > 0:
+                aux_losses = []
+                for target, criterion in aux_criteria.items():
+                    binary_target = (y_batch == STAGE5_NAMES.index(AUX_TARGET_STAGE[target])).float()
+                    aux_losses.append(criterion(outputs[f"{target}_logits"], binary_target))
+                if aux_losses:
+                    aux_loss = torch.stack(aux_losses).sum()
+                    loss = loss + aux_weight * aux_loss
             probabilities = torch.softmax(logits, dim=1)
 
         batch_size = y_batch.shape[0]
@@ -419,12 +480,12 @@ def evaluate_loader(
         y_pred.extend(logits.argmax(dim=1).detach().cpu().numpy().astype(int).tolist())
         logits_batches.append(logits.detach().cpu().numpy().astype(np.float32))
         prob_batches.append(probabilities.detach().cpu().numpy().astype(np.float32))
-        if "deep_logits" in outputs:
-            deep_logits = outputs["deep_logits"]
-            deep_probabilities = torch.sigmoid(deep_logits)
-            deep_y_pred.extend((deep_probabilities >= 0.5).detach().cpu().numpy().astype(int).tolist())
-            deep_logit_batches.append(deep_logits.detach().cpu().numpy().astype(np.float32))
-            deep_prob_batches.append(deep_probabilities.detach().cpu().numpy().astype(np.float32))
+        for target in aux_y_pred:
+            aux_logits = outputs[f"{target}_logits"]
+            aux_probabilities = torch.sigmoid(aux_logits)
+            aux_y_pred[target].extend((aux_probabilities >= 0.5).detach().cpu().numpy().astype(int).tolist())
+            aux_logit_batches[target].append(aux_logits.detach().cpu().numpy().astype(np.float32))
+            aux_prob_batches[target].append(aux_probabilities.detach().cpu().numpy().astype(np.float32))
 
     loss = total_loss / max(total_count, 1)
     metrics = evaluate_5_and_4(y_true, y_pred)
@@ -438,21 +499,31 @@ def evaluate_loader(
         if prob_batches
         else np.empty((0, len(STAGE5_NAMES)), dtype=np.float32)
     )
-    return {
+    result = {
         "loss": loss,
         "stage_loss": total_stage_loss / max(total_count, 1),
-        "aux_loss": total_aux_loss / max(total_count, 1) if aux_criterion is not None and aux_weight > 0 else None,
+        "aux_loss": total_aux_loss / max(total_count, 1) if aux_criteria and aux_weight > 0 else None,
         "metrics": json_ready(metrics),
         "deep_binary_from_stage_metrics": evaluate_deep_binary(y_true, deep_predictions_from_stage(y_pred)),
-        "deep_binary_aux_metrics": evaluate_deep_binary(y_true, deep_y_pred) if deep_y_pred else None,
+        "rem_binary_from_stage_metrics": evaluate_aux_binary(y_true, aux_predictions_from_stage(y_pred, "rem"), "rem"),
+        "deep_binary_aux_metrics": evaluate_deep_binary(y_true, aux_y_pred["deep"]) if aux_y_pred.get("deep") else None,
+        "rem_binary_aux_metrics": evaluate_aux_binary(y_true, aux_y_pred["rem"], "rem") if aux_y_pred.get("rem") else None,
         "y_true": y_true,
         "y_pred": y_pred,
-        "deep_y_pred": deep_y_pred,
         "logits": logits_array,
         "probabilities": prob_array,
-        "deep_logits": np.concatenate(deep_logit_batches, axis=0) if deep_logit_batches else None,
-        "deep_probabilities": np.concatenate(deep_prob_batches, axis=0) if deep_prob_batches else None,
     }
+    for target, predictions in aux_y_pred.items():
+        result[f"{target}_y_pred"] = predictions
+        result[f"{target}_logits"] = np.concatenate(aux_logit_batches[target], axis=0) if aux_logit_batches[target] else None
+        result[f"{target}_probabilities"] = (
+            np.concatenate(aux_prob_batches[target], axis=0) if aux_prob_batches[target] else None
+        )
+    for target in AUX_TARGETS_FOR_OUTPUT:
+        result.setdefault(f"{target}_y_pred", [])
+        result.setdefault(f"{target}_logits", None)
+        result.setdefault(f"{target}_probabilities", None)
+    return result
 
 
 def load_teacher_train_probs(path: Path, arrays: dict[str, np.ndarray]) -> np.ndarray:
@@ -510,6 +581,8 @@ def train_lstm(
 ) -> dict[str, Any]:
     if aux_weight < 0:
         raise ValueError(f"aux_weight must be non-negative: {aux_weight}")
+    if aux_weight > 0 and aux_head == "none":
+        raise ValueError("--aux-head must not be none when aux_weight is positive")
     if not 0.0 <= feature_dropout_prob < 1.0:
         raise ValueError(f"feature_dropout_prob must be in [0, 1): {feature_dropout_prob}")
     if distill_weight < 0:
@@ -559,10 +632,12 @@ def train_lstm(
         focal_gamma=focal_gamma,
         label_smoothing=label_smoothing,
     )
-    aux_criterion = (
-        make_deep_aux_criterion(y_train, device=device, pos_weight_mode=aux_deep_pos_weight_mode)
-        if aux_head == "deep" and aux_weight > 0
-        else None
+    aux_criteria = make_aux_criteria(
+        y_train,
+        device=device,
+        aux_head=aux_head,
+        aux_weight=aux_weight,
+        pos_weight_mode=aux_deep_pos_weight_mode,
     )
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
@@ -598,7 +673,7 @@ def train_lstm(
             loader=train_loader,
             stage_criterion=stage_criterion,
             device=device,
-            aux_criterion=aux_criterion,
+            aux_criteria=aux_criteria,
             aux_weight=aux_weight,
             optimizer=optimizer,
             feature_dropout_indices=feature_dropout_indices,
@@ -616,7 +691,7 @@ def train_lstm(
             loader=val_loader,
             stage_criterion=stage_criterion,
             device=device,
-            aux_criterion=aux_criterion,
+            aux_criteria=aux_criteria,
             aux_weight=aux_weight,
         )
         selection_score = validation_score(val_result["metrics"], selection_metric)
@@ -634,7 +709,9 @@ def train_lstm(
             "val_aux_loss": val_result["aux_loss"],
             "val_metrics": val_result["metrics"],
             "val_deep_binary_from_stage_metrics": val_result["deep_binary_from_stage_metrics"],
+            "val_rem_binary_from_stage_metrics": val_result["rem_binary_from_stage_metrics"],
             "val_deep_binary_aux_metrics": val_result["deep_binary_aux_metrics"],
+            "val_rem_binary_aux_metrics": val_result["rem_binary_aux_metrics"],
             "selection_metric": selection_metric,
             "selection_score": selection_score,
         }
@@ -698,7 +775,7 @@ def train_lstm(
         loader=val_loader,
         stage_criterion=stage_criterion,
         device=device,
-        aux_criterion=aux_criterion,
+        aux_criteria=aux_criteria,
         aux_weight=aux_weight,
     )
     test_final = evaluate_loader(
@@ -706,7 +783,7 @@ def train_lstm(
         loader=test_loader,
         stage_criterion=stage_criterion,
         device=device,
-        aux_criterion=aux_criterion,
+        aux_criteria=aux_criteria,
         aux_weight=aux_weight,
     )
 
@@ -771,7 +848,9 @@ def train_lstm(
             "aux_loss": val_final["aux_loss"],
             "metrics": val_final["metrics"],
             "deep_binary_from_stage_metrics": val_final["deep_binary_from_stage_metrics"],
+            "rem_binary_from_stage_metrics": val_final["rem_binary_from_stage_metrics"],
             "deep_binary_aux_metrics": val_final["deep_binary_aux_metrics"],
+            "rem_binary_aux_metrics": val_final["rem_binary_aux_metrics"],
         },
         "final_test": {
             "loss": test_final["loss"],
@@ -779,7 +858,9 @@ def train_lstm(
             "aux_loss": test_final["aux_loss"],
             "metrics": test_final["metrics"],
             "deep_binary_from_stage_metrics": test_final["deep_binary_from_stage_metrics"],
+            "rem_binary_from_stage_metrics": test_final["rem_binary_from_stage_metrics"],
             "deep_binary_aux_metrics": test_final["deep_binary_aux_metrics"],
+            "rem_binary_aux_metrics": test_final["rem_binary_aux_metrics"],
         },
     }
 
@@ -796,14 +877,15 @@ def train_lstm(
         "test_probs": test_final["probabilities"],
         "stage5_names": np.asarray(STAGE5_NAMES),
     }
-    if val_final["deep_logits"] is not None:
-        prediction_arrays["val_deep_logits"] = val_final["deep_logits"]
-        prediction_arrays["val_deep_probs"] = val_final["deep_probabilities"]
-        prediction_arrays["val_deep_y_pred"] = np.asarray(val_final["deep_y_pred"], dtype=np.int64)
-    if test_final["deep_logits"] is not None:
-        prediction_arrays["test_deep_logits"] = test_final["deep_logits"]
-        prediction_arrays["test_deep_probs"] = test_final["deep_probabilities"]
-        prediction_arrays["test_deep_y_pred"] = np.asarray(test_final["deep_y_pred"], dtype=np.int64)
+    for target in AUX_TARGETS_FOR_OUTPUT:
+        if val_final[f"{target}_logits"] is not None:
+            prediction_arrays[f"val_{target}_logits"] = val_final[f"{target}_logits"]
+            prediction_arrays[f"val_{target}_probs"] = val_final[f"{target}_probabilities"]
+            prediction_arrays[f"val_{target}_y_pred"] = np.asarray(val_final[f"{target}_y_pred"], dtype=np.int64)
+        if test_final[f"{target}_logits"] is not None:
+            prediction_arrays[f"test_{target}_logits"] = test_final[f"{target}_logits"]
+            prediction_arrays[f"test_{target}_probs"] = test_final[f"{target}_probabilities"]
+            prediction_arrays[f"test_{target}_y_pred"] = np.asarray(test_final[f"{target}_y_pred"], dtype=np.int64)
     for split_name in ("val", "test"):
         subject_key = f"{split_name}_subject_ids"
         epoch_key = f"{split_name}_epoch_indices"
@@ -892,15 +974,15 @@ def main() -> None:
     )
     parser.add_argument(
         "--aux-head",
-        choices=("none", "deep"),
+        choices=("none", "deep", "rem", "deep_rem"),
         default="none",
-        help="Optional auxiliary head. deep adds an N3-vs-non-N3 binary head.",
+        help="Optional auxiliary head. deep=N3-vs-rest, rem=REM-vs-rest, deep_rem=both heads.",
     )
     parser.add_argument(
         "--aux-weight",
         type=float,
         default=0.0,
-        help="Weight for the auxiliary loss. Used when --aux-head deep.",
+        help="Weight for the auxiliary loss. Used when --aux-head is not none.",
     )
     parser.add_argument(
         "--aux-deep-pos-weight-mode",
