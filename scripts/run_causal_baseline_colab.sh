@@ -9,12 +9,14 @@ set -euo pipefail
 #   temporal_baseline: acc_vm_activity, hr_mean, ibi_mean, temp_mean, bvp_std
 #   cardio_baseline: hr_mean, ibi_mean
 #   cardio_temp_baseline: hr_mean, ibi_mean, temp_mean
+#   movement_cardio_temp_baseline: acc_vm_activity, hr_mean, ibi_mean, temp_mean
 #   temporal_w20_baseline: full w20 CSV + temporal_baseline feature set
 #
 # Examples:
 #   bash scripts/run_causal_baseline_colab.sh
 #   VARIANTS="cardio_baseline" bash scripts/run_causal_baseline_colab.sh
 #   VARIANTS="cardio_temp_baseline" bash scripts/run_causal_baseline_colab.sh
+#   VARIANTS="movement_cardio_temp_baseline" bash scripts/run_causal_baseline_colab.sh
 #   SEEDS="42 7 123" VARIANTS="cardio_baseline" bash scripts/run_causal_baseline_colab.sh
 
 OUTPUT_ROOT="${OUTPUT_ROOT:-/content/drive/MyDrive/SSE_outputs}"
@@ -39,6 +41,9 @@ features_for_variant() {
     cardio_temp_baseline)
       echo "hr_mean,ibi_mean,temp_mean"
       ;;
+    movement_cardio_temp_baseline)
+      echo "acc_vm_activity,hr_mean,ibi_mean,temp_mean"
+      ;;
     *)
       echo "Unknown causal baseline variant: ${variant}" >&2
       return 1
@@ -49,7 +54,7 @@ features_for_variant() {
 input_csv_for_variant() {
   local variant="$1"
   case "${variant}" in
-    temporal_baseline | cardio_baseline | cardio_temp_baseline)
+    temporal_baseline | cardio_baseline | cardio_temp_baseline | movement_cardio_temp_baseline)
       echo "${SHORT_TEMPORAL_CSV}"
       ;;
     temporal_w20_baseline)
