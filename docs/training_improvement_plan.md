@@ -453,6 +453,28 @@ src/sse_sleep/evaluate_rem_threshold.py
 scripts/run_rem_threshold_colab.sh
 ```
 
+full w20 seed42 결과:
+
+```text
+validation-selected: argmax_baseline
+
+variant             val score  4 Macro  4 Kappa  Wake    N3      REM
+argmax_baseline     0.6988     0.4036   0.2401   0.5011  0.1043  0.3646
+rem_threshold0.40   0.6985     0.4031   0.2393   0.5011  0.1043  0.3638
+rem_threshold0.35   0.6959     0.4018   0.2379   0.5011  0.1043  0.3618
+rem_threshold0.30   0.6885     0.4010   0.2377   0.5014  0.1044  0.3627
+rem_threshold0.25   0.6776     0.3988   0.2347   0.5017  0.1047  0.3629
+rem_threshold0.20   0.6628     0.3924   0.2272   0.5012  0.1014  0.3558
+```
+
+결론:
+
+```text
+full w20에서는 threshold lowering이 REM을 개선하지 못하고 4-class/Kappa만 낮춘다.
+validation도 argmax baseline을 선택하므로 full w20 REM threshold는 중단한다.
+다음은 REM binary auxiliary head 또는 N3 보존 + REM 보정 multi-task loss를 확인한다.
+```
+
 ### 0.5. Full w20 후속 학습 후보
 
 Fusion에서 상보성이 보이면 full w20 단일 모델 쪽 후속 후보를 seed42로 확인한다.

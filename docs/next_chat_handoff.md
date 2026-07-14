@@ -480,6 +480,27 @@ Colab seed42 실행:
 !bash scripts/run_rem_threshold_colab.sh
 ```
 
+full w20 REM threshold seed42 결과:
+
+```text
+validation-selected: argmax_baseline
+
+variant             val score  4 Macro  4 Kappa  Wake    N3      REM
+argmax_baseline     0.6988     0.4036   0.2401   0.5011  0.1043  0.3646
+rem_threshold0.40   0.6985     0.4031   0.2393   0.5011  0.1043  0.3638
+rem_threshold0.35   0.6959     0.4018   0.2379   0.5011  0.1043  0.3618
+rem_threshold0.30   0.6885     0.4010   0.2377   0.5014  0.1044  0.3627
+rem_threshold0.25   0.6776     0.3988   0.2347   0.5017  0.1047  0.3629
+rem_threshold0.20   0.6628     0.3924   0.2272   0.5012  0.1014  0.3558
+```
+
+해석:
+
+```text
+full w20에서는 REM threshold lowering이 REM F1을 개선하지 못하고 4-class Macro/Kappa를 낮춘다.
+validation 기준도 argmax baseline을 선택하므로 full w20 REM threshold는 중단한다.
+```
+
 fixed fusion에도 같은 policy를 진단하려면:
 
 ```bash
