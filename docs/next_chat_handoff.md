@@ -272,6 +272,49 @@ remx11은 REM은 회복하지만 N3가 0.0417로 붕괴하고 4 Macro도 낮아 
 따라서 single-model 대안은 현재 fixed fusion을 대체하지 못한다.
 ```
 
+### 다음 우선 작업: distillation
+
+fixed fusion이 현재 best지만 2-model ensemble 비용이 있으므로, full w20 단일 student가 fixed fusion teacher를 따라가도록 distillation을 먼저 시도한다.
+
+teacher:
+
+```text
+fixed fusion classwise_nonrem0.90_rem0.20
+Wake/N1/N2/N3: 90% full w20 + 10% original temporal
+REM:           20% full w20 + 80% original temporal
+```
+
+구현:
+
+```text
+src/sse_sleep/export_lstm_predictions.py  # train_probs까지 export
+src/sse_sleep/build_fusion_teacher_probs.py
+scripts/run_distillation_colab.sh
+```
+
+seed42 후보:
+
+```text
+distill_w02: hard CE + 0.2 * KL(teacher || student)
+distill_w05: hard CE + 0.5 * KL(teacher || student)
+distill_w10: hard CE + 1.0 * KL(teacher || student)
+```
+
+Colab 실행:
+
+```bash
+%cd /content/SSE
+!git pull
+!bash scripts/run_distillation_colab.sh
+```
+
+판단:
+
+```text
+fixed fusion에는 못 미치더라도 full w20 대비 4-class Macro/Kappa 또는 REM을 개선하고 N3를 유지하면 3-seed 확장한다.
+seed42에서 N3가 크게 무너지거나 full w20보다 전반적으로 낮으면 distillation 1차는 중단한다.
+```
+
 판단 기준:
 
 ```text

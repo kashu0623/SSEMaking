@@ -320,6 +320,53 @@ REM     +0.0289
 다만 2-model ensemble이므로 비용/지연이 있다. 다음 full w20 후속 학습 후보와 w15에서 single-model 대안을 찾는다.
 ```
 
+### 0.25. Fusion distillation
+
+full w20 후속 학습 후보와 w15가 seed42에서 탈락했으므로, fixed fusion teacher를 full w20 단일 student로 distill한다.
+
+teacher:
+
+```text
+fixed fusion classwise_nonrem0.90_rem0.20
+Wake/N1/N2/N3: 90% full w20 + 10% original temporal
+REM:           20% full w20 + 80% original temporal
+```
+
+학습:
+
+```text
+loss = hard cross entropy + distill_weight * KL(teacher_probs || student_probs)
+```
+
+seed42 실행:
+
+```bash
+%cd /content/SSE
+!git pull
+!bash scripts/run_distillation_colab.sh
+```
+
+후보:
+
+```text
+distill_w02
+distill_w05
+distill_w10
+```
+
+유망한 후보만 3-seed 확장:
+
+```bash
+!SEEDS="42 7 123" VARIANTS="distill_w05" bash scripts/run_distillation_colab.sh
+```
+
+판단 기준:
+
+```text
+full w20 대비 REM 또는 4-class Macro/Kappa를 개선하면서 N3를 유지하면 확장한다.
+fixed fusion에 가까워질수록 좋지만, single-model이므로 fixed fusion보다 약간 낮아도 앱 비용 측면에서 후보가 될 수 있다.
+```
+
 ### 0.5. Full w20 후속 학습 후보
 
 Fusion에서 상보성이 보이면 full w20 단일 모델 쪽 후속 후보를 seed42로 확인한다.

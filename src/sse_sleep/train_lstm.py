@@ -98,8 +98,12 @@ def make_train_loader(
     y: np.ndarray,
     batch_size: int,
     sampler_mode: str,
+    teacher_probs: np.ndarray | None = None,
 ) -> DataLoader:
-    dataset = TensorDataset(torch.from_numpy(x).float(), torch.from_numpy(y).long())
+    tensors: list[torch.Tensor] = [torch.from_numpy(x).float(), torch.from_numpy(y).long()]
+    if teacher_probs is not None:
+        tensors.append(torch.from_numpy(teacher_probs).float())
+    dataset = TensorDataset(*tensors)
     if sampler_mode == "none":
         return DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=False)
     if sampler_mode != "weighted":
@@ -253,20 +257,27 @@ def run_epoch(
     optimizer: torch.optim.Optimizer | None = None,
     feature_dropout_indices: torch.Tensor | None = None,
     feature_dropout_prob: float = 0.0,
+    distill_weight: float = 0.0,
 ) -> dict[str, Any]:
     training = optimizer is not None
     model.train(training)
     total_loss = 0.0
     total_stage_loss = 0.0
     total_aux_loss = 0.0
+    total_distill_loss = 0.0
     total_count = 0
     y_true: list[int] = []
     y_pred: list[int] = []
     deep_y_pred: list[int] = []
 
-    for x_batch, y_batch in loader:
+    for batch in loader:
+        x_batch = batch[0]
+        y_batch = batch[1]
+        teacher_batch = batch[2] if len(batch) > 2 else None
         x_batch = x_batch.to(device)
         y_batch = y_batch.to(device)
+        if teacher_batch is not None:
+            teacher_batch = teacher_batch.to(device)
         if (
             training
             and feature_dropout_indices is not None
@@ -284,6 +295,14 @@ def run_epoch(
             stage_loss = stage_criterion(logits, y_batch)
             loss = stage_loss
             aux_loss = None
+            distill_loss = None
+            if teacher_batch is not None and distill_weight > 0:
+                distill_loss = F.kl_div(
+                    F.log_softmax(logits, dim=1),
+                    teacher_batch,
+                    reduction="batchmean",
+                )
+                loss = loss + distill_weight * distill_loss
             if aux_criterion is not None and "deep_logits" in outputs and aux_weight > 0:
                 deep_target = (y_batch == STAGE5_NAMES.index("N3")).float()
                 aux_loss = aux_criterion(outputs["deep_logits"], deep_target)
@@ -298,6 +317,8 @@ def run_epoch(
         total_stage_loss += float(stage_loss.detach().cpu()) * batch_size
         if aux_loss is not None:
             total_aux_loss += float(aux_loss.detach().cpu()) * batch_size
+        if distill_loss is not None:
+            total_distill_loss += float(distill_loss.detach().cpu()) * batch_size
         total_count += batch_size
         y_true.extend(y_batch.detach().cpu().numpy().astype(int).tolist())
         y_pred.extend(logits.argmax(dim=1).detach().cpu().numpy().astype(int).tolist())
@@ -308,6 +329,7 @@ def run_epoch(
         "loss": total_loss / max(total_count, 1),
         "stage_loss": total_stage_loss / max(total_count, 1),
         "aux_loss": total_aux_loss / max(total_count, 1) if aux_criterion is not None and aux_weight > 0 else None,
+        "distill_loss": total_distill_loss / max(total_count, 1) if distill_weight > 0 else None,
         "y_true": y_true,
         "y_pred": y_pred,
     }
@@ -412,6 +434,28 @@ def evaluate_loader(
     }
 
 
+def load_teacher_train_probs(path: Path, arrays: dict[str, np.ndarray]) -> np.ndarray:
+    teacher = load_npz(path)
+    required = ["train_y_true", "train_probs"]
+    missing = [key for key in required if key not in teacher]
+    if missing:
+        raise ValueError(f"Missing required teacher arrays in {path}: {missing}")
+    teacher_y = teacher["train_y_true"].astype(np.int64)
+    y_train = arrays["y_train"].astype(np.int64)
+    if teacher_y.shape != y_train.shape or not np.array_equal(teacher_y, y_train):
+        raise ValueError("Teacher train_y_true does not align with dataset y_train")
+    for key in ("train_subject_ids", "train_epoch_indices"):
+        if key in teacher and key in arrays and not np.array_equal(teacher[key], arrays[key]):
+            raise ValueError(f"Teacher {key} does not align with dataset {key}")
+    teacher_probs = teacher["train_probs"].astype(np.float32)
+    if teacher_probs.shape != (y_train.shape[0], len(STAGE5_NAMES)):
+        raise ValueError(f"Unexpected teacher train_probs shape: {teacher_probs.shape}")
+    row_sums = teacher_probs.sum(axis=1, keepdims=True)
+    if np.any(row_sums <= 0):
+        raise ValueError("Teacher train_probs contains rows with non-positive sums")
+    return (teacher_probs / row_sums).astype(np.float32)
+
+
 def train_lstm(
     npz_path: Path,
     out_dir: Path,
@@ -438,11 +482,15 @@ def train_lstm(
     aux_deep_pos_weight_mode: str,
     feature_dropout_pattern: str,
     feature_dropout_prob: float,
+    teacher_probs_npz: Path | None,
+    distill_weight: float,
 ) -> dict[str, Any]:
     if aux_weight < 0:
         raise ValueError(f"aux_weight must be non-negative: {aux_weight}")
     if not 0.0 <= feature_dropout_prob < 1.0:
         raise ValueError(f"feature_dropout_prob must be in [0, 1): {feature_dropout_prob}")
+    if distill_weight < 0:
+        raise ValueError(f"distill_weight must be non-negative: {distill_weight}")
     set_seed(seed)
     arrays = load_npz(npz_path)
     x_train = arrays["X_train"].astype(np.float32)
@@ -452,6 +500,11 @@ def train_lstm(
     x_test = arrays["X_test"].astype(np.float32)
     y_test = arrays["y_test"].astype(np.int64)
     feature_names = arrays["feature_names"].astype(str).tolist()
+    teacher_train_probs = (
+        load_teacher_train_probs(teacher_probs_npz, arrays)
+        if teacher_probs_npz is not None and distill_weight > 0
+        else None
+    )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = RecurrentSleepClassifier(
@@ -484,7 +537,13 @@ def train_lstm(
     )
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
-    train_loader = make_train_loader(x_train, y_train, batch_size=batch_size, sampler_mode=train_sampler)
+    train_loader = make_train_loader(
+        x_train,
+        y_train,
+        batch_size=batch_size,
+        sampler_mode=train_sampler,
+        teacher_probs=teacher_train_probs,
+    )
     val_loader = make_loader(x_val, y_val, batch_size=batch_size, shuffle=False)
     test_loader = make_loader(x_test, y_test, batch_size=batch_size, shuffle=False)
     feature_dropout_indices_np = np.asarray(
@@ -515,6 +574,7 @@ def train_lstm(
             optimizer=optimizer,
             feature_dropout_indices=feature_dropout_indices,
             feature_dropout_prob=feature_dropout_prob,
+            distill_weight=distill_weight,
         )
         train_loss = train_result["loss"]
         train_true = train_result["y_true"]
@@ -535,6 +595,7 @@ def train_lstm(
             "train_loss": train_loss,
             "train_stage_loss": train_result["stage_loss"],
             "train_aux_loss": train_result["aux_loss"],
+            "train_distill_loss": train_result["distill_loss"],
             "train_metrics": json_ready(train_metrics),
             "val_loss": val_result["loss"],
             "val_stage_loss": val_result["stage_loss"],
@@ -583,6 +644,8 @@ def train_lstm(
                     "feature_dropout_pattern": feature_dropout_pattern,
                     "feature_dropout_prob": feature_dropout_prob,
                     "feature_dropout_count": int(feature_dropout_indices_np.shape[0]),
+                    "teacher_probs_npz": None if teacher_probs_npz is None else str(teacher_probs_npz),
+                    "distill_weight": distill_weight,
                     "feature_names": feature_names,
                     "stage5_names": STAGE5_NAMES,
                 },
@@ -643,6 +706,8 @@ def train_lstm(
             "feature_dropout_pattern": feature_dropout_pattern,
             "feature_dropout_prob": feature_dropout_prob,
             "feature_dropout_count": int(feature_dropout_indices_np.shape[0]),
+            "teacher_probs_npz": None if teacher_probs_npz is None else str(teacher_probs_npz),
+            "distill_weight": distill_weight,
         },
         "array_shapes": {
             "X_train": list(x_train.shape),
@@ -818,6 +883,18 @@ def main() -> None:
         default=0.0,
         help="Probability of zeroing selected features for each training sample. Evaluation is unchanged.",
     )
+    parser.add_argument(
+        "--teacher-probs-npz",
+        type=Path,
+        default=None,
+        help="Optional NPZ containing train_probs soft targets for distillation.",
+    )
+    parser.add_argument(
+        "--distill-weight",
+        type=float,
+        default=0.0,
+        help="Weight for KL(teacher_probs || student_probs) distillation loss on the train split.",
+    )
     args = parser.parse_args()
 
     report = train_lstm(
@@ -846,6 +923,8 @@ def main() -> None:
         aux_deep_pos_weight_mode=args.aux_deep_pos_weight_mode,
         feature_dropout_pattern=args.feature_dropout_pattern,
         feature_dropout_prob=args.feature_dropout_prob,
+        teacher_probs_npz=args.teacher_probs_npz,
+        distill_weight=args.distill_weight,
     )
     print(json.dumps({"best_epoch": report["best_epoch"], "final_test": report["final_test"]}, indent=2, ensure_ascii=False))
 

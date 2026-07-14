@@ -70,6 +70,8 @@ def export_lstm_predictions(
     batch_size: int,
 ) -> dict[str, Any]:
     arrays = load_npz(npz_path)
+    x_train = arrays["X_train"].astype(np.float32)
+    y_train = arrays["y_train"].astype(np.int64)
     x_val = arrays["X_val"].astype(np.float32)
     y_val = arrays["y_val"].astype(np.int64)
     x_test = arrays["X_test"].astype(np.float32)
@@ -87,10 +89,15 @@ def export_lstm_predictions(
     ).to(device)
     model.load_state_dict(normalize_state_dict_keys(checkpoint["model_state_dict"]))
 
+    train = predict_split(model, make_loader(x_train, y_train, batch_size=batch_size), device=device)
     val = predict_split(model, make_loader(x_val, y_val, batch_size=batch_size), device=device)
     test = predict_split(model, make_loader(x_test, y_test, batch_size=batch_size), device=device)
 
     prediction_arrays: dict[str, np.ndarray] = {
+        "train_y_true": train["y_true"],
+        "train_y_pred": train["y_pred"],
+        "train_logits": train["logits"],
+        "train_probs": train["probs"],
         "val_y_true": val["y_true"],
         "val_y_pred": val["y_pred"],
         "val_logits": val["logits"],
@@ -101,7 +108,7 @@ def export_lstm_predictions(
         "test_probs": test["probs"],
         "stage5_names": np.asarray(STAGE5_NAMES),
     }
-    for split_name in ("val", "test"):
+    for split_name in ("train", "val", "test"):
         for suffix in ("subject_ids", "epoch_indices"):
             key = f"{split_name}_{suffix}"
             if key in arrays:
@@ -115,6 +122,7 @@ def export_lstm_predictions(
         "out_npz": str(out_npz),
         "device": str(device),
         "batch_size": batch_size,
+        "train_samples": int(train["y_true"].shape[0]),
         "val_samples": int(val["y_true"].shape[0]),
         "test_samples": int(test["y_true"].shape[0]),
     }
