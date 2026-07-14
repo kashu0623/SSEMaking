@@ -388,10 +388,27 @@ distillation 1차 후보는 3-seed 확장하지 않는다.
 
 ```text
 1. fixed fusion classwise_nonrem0.90_rem0.20의 앱 배포 비용/지연 검토
-2. soft KL distillation 대신 teacher hard-label pseudo-label 학습
-3. full w20 기반 REM-specialist calibration/threshold 정책 평가
+2. validation 기반 REM calibration / threshold
+3. soft KL distillation 대신 teacher hard-label pseudo-label 학습
+4. REM binary auxiliary head
+5. N3 보존 + REM 보정 multi-task loss
+6. 그래도 single-model 대안이 없으면 h96/h128 또는 2-layer 등 모델 capacity 실험
+```
+
+fusion을 제외한 full w20 단일 모델 개선 후보:
+
+```text
+1. validation 기반 REM calibration / threshold
+2. teacher hard-label pseudo-label 학습
+3. REM binary auxiliary head
+4. N3 보존 + REM 보정 multi-task loss
+5. 모델 capacity 조정: h96/h128, 2-layer
+```
+
+추가 평가 후보:
+
+```text
 4. fixed fusion 및 full w20에 causal post-processing 재평가
-5. 그래도 single-model 대안이 없으면 h96/h128 또는 2-layer 등 모델 capacity 실험
 ```
 
 우선 구현 후보:
