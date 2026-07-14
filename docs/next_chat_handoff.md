@@ -115,6 +115,9 @@ temporal_baseline                0.3189   0.1737   0.3972   0.2195   0.4411  0.0
 cardio_baseline                  0.3227   0.1790   0.3964   0.2094   0.4263  0.1721  0.3089
 cardio_temp_baseline             0.3070   0.1863   0.3813   0.2338   0.4603  0.0420  0.3518
 movement_cardio_temp_baseline    0.3219   0.2105   0.3918   0.2498   0.4926  0.0275  0.3824
+bvp_baseline                     0.2955   0.1733   0.3599   0.1924   0.4900  0.0563  0.2893
+bvp_cardio_baseline              0.2684   0.1187   0.3511   0.1565   0.4080  0.0929  0.3154
+bvp_temp_baseline                0.3122   0.1798   0.3739   0.1922   0.4160  0.0939  0.3322
 ```
 
 해석:
@@ -124,42 +127,50 @@ temporal_baseline: REM은 매우 좋지만 Wake/Kappa/N3 약함
 cardio_baseline: N3는 좋지만 REM/Wake/Kappa 약함
 cardio_temp_baseline: REM/Wake/Kappa 일부 회복, N3 붕괴
 movement_cardio_temp_baseline: REM/Wake/Kappa 좋지만 N3가 거의 붕괴
+bvp_baseline: bvp_std 단독은 test 기준 N3/REM/4-class가 모두 낮아 seed42에서 탈락
+bvp_cardio_baseline: N3는 original temporal 이상으로 회복하지만 Wake/Kappa/4-class와 REM이 낮아 seed42에서 탈락
+bvp_temp_baseline: bvp 분리 3개 중 가장 균형은 낫지만 Wake/Kappa/4-class가 낮고 full w20을 넘지 못해 seed42에서 탈락
 ```
 
-현재 causal baseline 후보 중 3-seed 확장할 모델은 아직 없다.
+현재 causal baseline 후보 중 3-seed 확장할 모델은 없다.
 
-### 다음 채팅방 우선 작업
+### 다음 성능 향상 테스트 방향
 
-다음은 `bvp_std` causal baseline의 역할을 분리해서 확인한다. 아래 variant들은 `scripts/run_causal_baseline_colab.sh`의 `features_for_variant`와 `input_csv_for_variant`에 추가되어 있다.
+`bvp_std` causal baseline 분리까지 모두 seed42에서 탈락했으므로, 다음은 full w20과 original temporal의 장단점을 직접 결합/보존하는 방향으로 진행한다.
 
-우선 추가/실행할 variant:
+우선순위:
 
 ```text
-bvp_baseline:
-bvp_std
-
-bvp_cardio_baseline:
-bvp_std, hr_mean, ibi_mean
-
-bvp_temp_baseline:
-bvp_std, temp_mean
+1. original temporal + full w20 prediction late fusion
+2. class-wise fusion: REM은 original temporal 쪽, N3/4-class는 full w20 쪽 비중을 높임
+3. full w20 label smoothing 0.05 또는 REM weight 1.1
+4. full w20 long-feature dropout: *_20 feature train-time dropout
+5. w15 중간 long-window 확인
 ```
 
-권장 순서:
+구현/스크립트:
 
 ```text
-1. bvp_baseline seed42
-2. bvp_cardio_baseline seed42
-3. bvp_temp_baseline seed42
-4. seed42에서 REM/Wake/Kappa와 N3 균형이 가장 나은 후보만 3-seed 확장
+src/sse_sleep/evaluate_prediction_fusion.py
+scripts/run_prediction_fusion_colab.sh
+scripts/run_full_w20_next_training_colab.sh
+scripts/run_temporal_long_window_colab.sh  # VARIANTS="15"로 w15 실행
 ```
 
-Colab 예상 실행 형태:
+권장 실행 순서:
 
 ```bash
 %cd /content/SSE
 !git pull
-!VARIANTS="bvp_baseline bvp_cardio_baseline bvp_temp_baseline" bash scripts/run_causal_baseline_colab.sh
+
+# 1-2. 학습 없이 prediction fusion 진단
+!bash scripts/run_prediction_fusion_colab.sh
+
+# 3-4. seed42 full w20 후속 학습 후보
+!bash scripts/run_full_w20_next_training_colab.sh
+
+# 5. w15 중간 window
+!VARIANTS="15" bash scripts/run_temporal_long_window_colab.sh
 ```
 
 판단 기준:

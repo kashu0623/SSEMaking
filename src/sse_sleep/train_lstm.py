@@ -123,10 +123,13 @@ def class_weights(
     num_classes: int,
     mode: str,
     n3_weight_multiplier: float = 1.0,
+    rem_weight_multiplier: float = 1.0,
 ) -> torch.Tensor | None:
     """Return class weights for cross entropy, or None for unweighted loss."""
     if n3_weight_multiplier <= 0:
         raise ValueError(f"n3_weight_multiplier must be positive: {n3_weight_multiplier}")
+    if rem_weight_multiplier <= 0:
+        raise ValueError(f"rem_weight_multiplier must be positive: {rem_weight_multiplier}")
     if mode == "none":
         return None
     counts = np.bincount(y_train.astype(np.int64), minlength=num_classes).astype(np.float32)
@@ -139,6 +142,10 @@ def class_weights(
     if n3_weight_multiplier != 1.0:
         n3_index = STAGE5_NAMES.index("N3")
         weights[n3_index] *= n3_weight_multiplier
+        weights = weights / weights.mean()
+    if rem_weight_multiplier != 1.0:
+        rem_index = STAGE5_NAMES.index("REM")
+        weights[rem_index] *= rem_weight_multiplier
         weights = weights / weights.mean()
     return torch.tensor(weights, dtype=torch.float32)
 
@@ -244,6 +251,8 @@ def run_epoch(
     aux_criterion: nn.Module | None = None,
     aux_weight: float = 0.0,
     optimizer: torch.optim.Optimizer | None = None,
+    feature_dropout_indices: torch.Tensor | None = None,
+    feature_dropout_prob: float = 0.0,
 ) -> dict[str, Any]:
     training = optimizer is not None
     model.train(training)
@@ -258,6 +267,15 @@ def run_epoch(
     for x_batch, y_batch in loader:
         x_batch = x_batch.to(device)
         y_batch = y_batch.to(device)
+        if (
+            training
+            and feature_dropout_indices is not None
+            and feature_dropout_indices.numel() > 0
+            and feature_dropout_prob > 0.0
+        ):
+            keep_mask = (torch.rand((x_batch.shape[0], 1, 1), device=device) >= feature_dropout_prob).float()
+            x_batch = x_batch.clone()
+            x_batch[:, :, feature_dropout_indices] *= keep_mask
         if training:
             optimizer.zero_grad(set_to_none=True)
         with torch.set_grad_enabled(training):
@@ -408,6 +426,7 @@ def train_lstm(
     seed: int,
     class_weight_mode: str,
     n3_weight_multiplier: float,
+    rem_weight_multiplier: float,
     model_type: str,
     loss_type: str,
     focal_gamma: float,
@@ -417,9 +436,13 @@ def train_lstm(
     aux_head: str,
     aux_weight: float,
     aux_deep_pos_weight_mode: str,
+    feature_dropout_pattern: str,
+    feature_dropout_prob: float,
 ) -> dict[str, Any]:
     if aux_weight < 0:
         raise ValueError(f"aux_weight must be non-negative: {aux_weight}")
+    if not 0.0 <= feature_dropout_prob < 1.0:
+        raise ValueError(f"feature_dropout_prob must be in [0, 1): {feature_dropout_prob}")
     set_seed(seed)
     arrays = load_npz(npz_path)
     x_train = arrays["X_train"].astype(np.float32)
@@ -445,6 +468,7 @@ def train_lstm(
         len(STAGE5_NAMES),
         mode=class_weight_mode,
         n3_weight_multiplier=n3_weight_multiplier,
+        rem_weight_multiplier=rem_weight_multiplier,
     )
     weights_for_loss = weights.to(device) if weights is not None else None
     stage_criterion = make_criterion(
@@ -463,6 +487,11 @@ def train_lstm(
     train_loader = make_train_loader(x_train, y_train, batch_size=batch_size, sampler_mode=train_sampler)
     val_loader = make_loader(x_val, y_val, batch_size=batch_size, shuffle=False)
     test_loader = make_loader(x_test, y_test, batch_size=batch_size, shuffle=False)
+    feature_dropout_indices_np = np.asarray(
+        [idx for idx, name in enumerate(feature_names) if feature_dropout_pattern and feature_dropout_pattern in name],
+        dtype=np.int64,
+    )
+    feature_dropout_indices = torch.as_tensor(feature_dropout_indices_np, dtype=torch.long, device=device)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     best_model_path = out_dir / "lstm_best.pt"
@@ -484,6 +513,8 @@ def train_lstm(
             aux_criterion=aux_criterion,
             aux_weight=aux_weight,
             optimizer=optimizer,
+            feature_dropout_indices=feature_dropout_indices,
+            feature_dropout_prob=feature_dropout_prob,
         )
         train_loss = train_result["loss"]
         train_true = train_result["y_true"]
@@ -540,6 +571,7 @@ def train_lstm(
                     "model_type": model_type,
                     "class_weight_mode": class_weight_mode,
                     "n3_weight_multiplier": n3_weight_multiplier,
+                    "rem_weight_multiplier": rem_weight_multiplier,
                     "loss_type": loss_type,
                     "focal_gamma": focal_gamma,
                     "label_smoothing": label_smoothing,
@@ -548,6 +580,9 @@ def train_lstm(
                     "aux_head": aux_head,
                     "aux_weight": aux_weight,
                     "aux_deep_pos_weight_mode": aux_deep_pos_weight_mode,
+                    "feature_dropout_pattern": feature_dropout_pattern,
+                    "feature_dropout_prob": feature_dropout_prob,
+                    "feature_dropout_count": int(feature_dropout_indices_np.shape[0]),
                     "feature_names": feature_names,
                     "stage5_names": STAGE5_NAMES,
                 },
@@ -596,6 +631,7 @@ def train_lstm(
             "model_type": model_type,
             "class_weight_mode": class_weight_mode,
             "n3_weight_multiplier": n3_weight_multiplier,
+            "rem_weight_multiplier": rem_weight_multiplier,
             "loss_type": loss_type,
             "focal_gamma": focal_gamma,
             "label_smoothing": label_smoothing,
@@ -604,6 +640,9 @@ def train_lstm(
             "aux_head": aux_head,
             "aux_weight": aux_weight,
             "aux_deep_pos_weight_mode": aux_deep_pos_weight_mode,
+            "feature_dropout_pattern": feature_dropout_pattern,
+            "feature_dropout_prob": feature_dropout_prob,
+            "feature_dropout_count": int(feature_dropout_indices_np.shape[0]),
         },
         "array_shapes": {
             "X_train": list(x_train.shape),
@@ -614,6 +653,7 @@ def train_lstm(
         "stage5_names": list(STAGE5_NAMES),
         "class_weight_mode": class_weight_mode,
         "n3_weight_multiplier": n3_weight_multiplier,
+        "rem_weight_multiplier": rem_weight_multiplier,
         "class_weights": None if weights is None else weights.detach().cpu().numpy().tolist(),
         "best_epoch": best_epoch,
         "best_selection_metric": selection_metric,
@@ -707,6 +747,12 @@ def main() -> None:
         help="Additional multiplier for the N3 class weight after the selected class weighting mode.",
     )
     parser.add_argument(
+        "--rem-weight-multiplier",
+        type=float,
+        default=1.0,
+        help="Additional multiplier for the REM class weight after the selected class weighting mode.",
+    )
+    parser.add_argument(
         "--loss-type",
         choices=("cross_entropy", "focal"),
         default="cross_entropy",
@@ -761,6 +807,17 @@ def main() -> None:
         default="balanced",
         help="Positive-class weighting for the Deep/N3 auxiliary BCE loss.",
     )
+    parser.add_argument(
+        "--feature-dropout-pattern",
+        default="",
+        help="Substring used to select input features for train-time group dropout. Empty disables selection.",
+    )
+    parser.add_argument(
+        "--feature-dropout-prob",
+        type=float,
+        default=0.0,
+        help="Probability of zeroing selected features for each training sample. Evaluation is unchanged.",
+    )
     args = parser.parse_args()
 
     report = train_lstm(
@@ -777,6 +834,7 @@ def main() -> None:
         seed=args.seed,
         class_weight_mode=args.class_weight_mode,
         n3_weight_multiplier=args.n3_weight_multiplier,
+        rem_weight_multiplier=args.rem_weight_multiplier,
         model_type=args.model_type,
         loss_type=args.loss_type,
         focal_gamma=args.focal_gamma,
@@ -786,6 +844,8 @@ def main() -> None:
         aux_head=args.aux_head,
         aux_weight=args.aux_weight,
         aux_deep_pos_weight_mode=args.aux_deep_pos_weight_mode,
+        feature_dropout_pattern=args.feature_dropout_pattern,
+        feature_dropout_prob=args.feature_dropout_prob,
     )
     print(json.dumps({"best_epoch": report["best_epoch"], "final_test": report["final_test"]}, indent=2, ensure_ascii=False))
 

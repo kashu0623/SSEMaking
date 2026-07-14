@@ -225,6 +225,77 @@ w30: 탈락
 
 다음 목표는 full w20의 장점인 4-class/N3 개선을 유지하면서 REM F1 하락을 줄이는 것이다.
 
+### 0. Prediction fusion 진단
+
+새 학습 전에 original temporal과 full w20의 prediction probability를 섞어 두 모델이 상보적인지 확인한다.
+
+```text
+alpha = 0.0: original temporal only
+alpha = 1.0: full w20 only
+```
+
+Colab seed42 실행:
+
+```bash
+%cd /content/SSE
+!git pull
+!bash scripts/run_prediction_fusion_colab.sh
+```
+
+class-wise fusion도 같은 스크립트에서 함께 평가한다. 기본 설정은 non-REM class에는 full w20 비중을 높이고, REM에는 original temporal 비중을 더 줄 수 있는 grid를 돈다.
+
+유망하면 3-seed로 확장:
+
+```bash
+!SEEDS="42 7 123" bash scripts/run_prediction_fusion_colab.sh
+```
+
+판단 기준:
+
+```text
+validation 기준으로 alpha/class-wise weight를 고른다.
+test는 선택된 weight의 일반화 확인용으로만 본다.
+full w20 대비 4-class Macro/Kappa와 N3를 유지하면서 REM이 회복되면 다음은 single-model distillation 또는 REM-preserving 학습으로 간다.
+```
+
+### 0.5. Full w20 후속 학습 후보
+
+Fusion에서 상보성이 보이면 full w20 단일 모델 쪽 후속 후보를 seed42로 확인한다.
+
+```bash
+!bash scripts/run_full_w20_next_training_colab.sh
+```
+
+기본 후보:
+
+```text
+ls005: label smoothing 0.05
+remx11: REM class weight multiplier 1.1
+longdrop_p10: *_20 long-window feature train-time dropout p=0.10
+```
+
+유망한 후보만 3-seed 확장:
+
+```bash
+!SEEDS="42 7 123" VARIANTS="ls005" bash scripts/run_full_w20_next_training_colab.sh
+```
+
+`train_lstm.py`에 추가된 옵션:
+
+```text
+--rem-weight-multiplier
+--feature-dropout-pattern
+--feature-dropout-prob
+```
+
+### 0.75. w15 중간 long-window
+
+w10은 탈락, w20은 현재 best, w30은 탈락했으므로 중간점인 w15를 seed42로 확인한다.
+
+```bash
+!VARIANTS="15" bash scripts/run_temporal_long_window_colab.sh
+```
+
 ### 1. Targeted slow w20
 
 기존 short temporal feature는 유지하고, long-window 20 feature는 N3와 관련성이 큰 slow physiology/movement feature에만 추가한다.
