@@ -556,6 +556,34 @@ REM만 오르고 N3가 pseudo-label처럼 0.05 이하로 무너지면 중단.
 4-class Macro/Kappa가 baseline보다 크게 낮으면 앱 후보로는 탈락.
 ```
 
+seed42 일부 결과:
+
+```text
+variant      5 Macro  5 Kappa  4 Macro  4 Kappa  Wake    N3      REM
+deeprem_w05  0.3069   0.1877   0.3781   0.2338   0.4525  0.0102  0.3529
+deeprem_w02  0.3128   0.1788   0.3864   0.2146   0.4745  0.0932  0.3162
+remaux_w05   0.3286   0.2227   0.4008   0.2582   0.5398  0.0678  0.3568
+```
+
+해석:
+
+```text
+deeprem_w05는 N3가 붕괴해 탈락.
+deeprem_w02는 N3는 original temporal 평균 이상이지만 REM/4-class가 낮아 탈락.
+remaux_w05는 4 Kappa/Wake가 좋지만 N3가 0.0833 아래이고 REM도 full w20 seed42 0.3646보다 낮아 3-seed 확장 보류.
+remaux_w02 결과 파일은 아직 확인되지 않았다.
+```
+
+다음 권장 실행:
+
+```bash
+# 낮은 aux weight 확인
+!VARIANTS="remaux_w005 remaux_w01 remaux_w02 deeprem_w005 deeprem_w01" RUN_TAG="low_aux" bash scripts/run_rem_aux_colab.sh
+
+# 4-class/app 기준 checkpoint selection 확인. RUN_TAG로 기존 결과 overwrite 방지.
+!VARIANTS="remaux_w005 remaux_w01 remaux_w02 remaux_w05" SELECTION_METRIC="4_macro_f1_plus_4_kappa" RUN_TAG="sel4combo" bash scripts/run_rem_aux_colab.sh
+```
+
 #### 4. Temporal policy post-processing
 
 모델 성능 자체가 아니라 앱 출력 정책으로 REM/N3 안정성을 개선한다. 이미 prediction probabilities가 있으므로 causal policy를 다시 평가할 수 있다.
