@@ -316,6 +316,18 @@ bvp_std
 
 이 feature는 앱에서도 online으로 계산 가능해야 하며, 미래 epoch나 test subject 통계 leakage를 쓰면 안 된다.
 
+1차 실험은 original short temporal CSV 위에 prior-only expanding baseline feature를 추가한다.
+
+```bash
+bash scripts/run_causal_baseline_colab.sh
+```
+
+seed42에서 original temporal 대비 4-class Macro F1/Kappa가 유지 또는 개선되고, N3 F1이 full w20 쪽으로 회복되면서 REM F1이 크게 무너지지 않으면 3-seed로 확장한다.
+
+```bash
+SEEDS="42 7 123" bash scripts/run_causal_baseline_colab.sh
+```
+
 ## 판단 기준
 
 1. 3-seed 평균에서 5-class Macro F1 또는 4-class Macro F1이 baseline보다 올라야 한다.
