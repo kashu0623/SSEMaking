@@ -53,6 +53,16 @@ def checkpoint_value(checkpoint: dict[str, Any], key: str, default: Any) -> Any:
     return checkpoint[key] if key in checkpoint else default
 
 
+def normalize_state_dict_keys(state_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    """Support checkpoints saved before the recurrent module was renamed."""
+    if any(key.startswith("recurrent.") for key in state_dict):
+        return state_dict
+    return {
+        key.replace("lstm.", "recurrent.", 1) if key.startswith("lstm.") else key: value
+        for key, value in state_dict.items()
+    }
+
+
 def export_lstm_predictions(
     npz_path: Path,
     checkpoint_path: Path,
@@ -75,7 +85,7 @@ def export_lstm_predictions(
         model_type=str(checkpoint_value(checkpoint, "model_type", "lstm")),
         aux_head=str(checkpoint_value(checkpoint, "aux_head", "none")),
     ).to(device)
-    model.load_state_dict(checkpoint["model_state_dict"])
+    model.load_state_dict(normalize_state_dict_keys(checkpoint["model_state_dict"]))
 
     val = predict_split(model, make_loader(x_val, y_val, batch_size=batch_size), device=device)
     test = predict_split(model, make_loader(x_test, y_test, batch_size=batch_size), device=device)
