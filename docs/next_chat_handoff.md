@@ -220,9 +220,38 @@ mean                                  0.4038   0.2394   0.5031  0.1136  0.3654
 validation-selected fusion은 full w20 3-seed 평균 대비 4-class Macro/Kappa, Wake, REM을 개선한다.
 N3는 full w20 0.1234보다 낮지만 original temporal 0.0833보다 높다.
 앱/4-class 관점에서는 fusion이 새 best 후보로 볼 만하다.
-다만 seed별 selected weight가 다르므로, 다음은 JSON 결과에서 동일한 classwise weight를 3-seed로 고정했을 때의 평균을 확인한다.
 `scripts/run_prediction_fusion_colab.sh`는 여러 seed 실행 시 고정 weight별 평균 요약을 자동 출력하고 아래 JSON을 저장한다.
 `/content/drive/MyDrive/SSE_outputs/fusion_original_temporal_full_w20_context20_h64_summary.json`
+```
+
+고정 weight 3-seed 평균 기준 best:
+
+```text
+selected fixed weight:
+classwise_nonrem0.90_rem0.20
+
+3-seed mean:
+4 Macro 0.4074
+4 Kappa 0.2458
+Wake    0.5034
+N3      0.1220
+REM     0.3722
+
+full w20 대비:
+4 Macro +0.0073
+4 Kappa +0.0093
+Wake    +0.0023
+N3      -0.0014
+REM     +0.0289
+```
+
+결론:
+
+```text
+앱/4-class 관점 새 best 후보는 fixed fusion classwise_nonrem0.90_rem0.20이다.
+full w20의 N3를 거의 유지하면서 REM을 original temporal 이상으로 회복한다.
+단일 모델이 아니라 original temporal + full w20 2-model ensemble이므로 앱 비용/지연 관점 검토가 필요하다.
+다음은 full w20 후속 학습 후보(ls005, remx11, longdrop_p10)와 w15를 확인해 single-model로 비슷한 trade-off가 가능한지 본다.
 ```
 
 판단 기준:

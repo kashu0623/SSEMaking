@@ -288,8 +288,36 @@ mean                                  0.4038   0.2394   0.5031  0.1136  0.3654
 앱/4-class 관점에서는 full w20보다 낫다.
 REM은 original temporal 평균 0.3650 수준까지 회복된다.
 N3는 full w20보다 낮아지지만 original temporal보다 높게 유지된다.
-다음은 seed별 best가 아니라 동일한 classwise weight 고정 시 3-seed 평균을 확인한다.
 `scripts/run_prediction_fusion_colab.sh`는 여러 seed 실행 시 고정 weight별 평균 요약을 자동 출력하고 `/content/drive/MyDrive/SSE_outputs/fusion_original_temporal_full_w20_context20_h64_summary.json`에 저장한다.
+```
+
+고정 weight 3-seed 평균 기준 best:
+
+```text
+classwise_nonrem0.90_rem0.20
+
+4 Macro 0.4074
+4 Kappa 0.2458
+Wake    0.5034
+N3      0.1220
+REM     0.3722
+```
+
+full w20 대비:
+
+```text
+4 Macro +0.0073
+4 Kappa +0.0093
+Wake    +0.0023
+N3      -0.0014
+REM     +0.0289
+```
+
+결론:
+
+```text
+앱/4-class 관점 새 best 후보는 fixed fusion classwise_nonrem0.90_rem0.20이다.
+다만 2-model ensemble이므로 비용/지연이 있다. 다음 full w20 후속 학습 후보와 w15에서 single-model 대안을 찾는다.
 ```
 
 ### 0.5. Full w20 후속 학습 후보
