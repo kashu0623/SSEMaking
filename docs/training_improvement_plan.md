@@ -384,6 +384,24 @@ distill_w05/w10은 REM은 회복하지만 N3가 붕괴한다.
 distillation 1차 후보는 3-seed 확장하지 않는다.
 ```
 
+다음 방향:
+
+```text
+1. fixed fusion classwise_nonrem0.90_rem0.20의 앱 배포 비용/지연 검토
+2. soft KL distillation 대신 teacher hard-label pseudo-label 학습
+3. full w20 기반 REM-specialist calibration/threshold 정책 평가
+4. fixed fusion 및 full w20에 causal post-processing 재평가
+5. 그래도 single-model 대안이 없으면 h96/h128 또는 2-layer 등 모델 capacity 실험
+```
+
+우선 구현 후보:
+
+```text
+pseudo_w02: ground truth CE + 0.2 * teacher hard CE
+pseudo_w05: ground truth CE + 0.5 * teacher hard CE
+pseudo_rem_only: REM target에만 teacher hard label 보조 loss
+```
+
 ### 0.5. Full w20 후속 학습 후보
 
 Fusion에서 상보성이 보이면 full w20 단일 모델 쪽 후속 후보를 seed42로 확인한다.

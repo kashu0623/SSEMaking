@@ -6,26 +6,56 @@
 
 아래 2026-07-08 섹션은 과거 진행 로그로 보존한다. 다음 채팅방은 이 2026-07-14 섹션을 우선 기준으로 이어가면 된다.
 
-현재 앱/4-class 관점 best 후보는 계속 아래 모델이다.
+현재 overall/app 4-class 관점 best 후보는 아래 fixed class-wise fusion이다.
+
+```text
+fixed fusion = classwise_nonrem0.90_rem0.20
+```
+
+구성:
+
+- 2-model ensemble:
+  - original temporal = `lstm_temporal_context20_h64_inverse`
+  - full w20 = `lstm_temporal_w20_context20_h64_inverse`
+- class-wise probability fusion:
+  - Wake/N1/N2/N3: `0.90 * full_w20 + 0.10 * original_temporal`
+  - REM: `0.20 * full_w20 + 0.80 * original_temporal`
+
+3-seed 평균:
+
+```text
+variant                                4 Macro  4 Kappa  Wake    N3      REM
+fixed fusion classwise_nonrem0.90_rem0.20 0.4074   0.2458   0.5034  0.1220  0.3722
+full w20                               0.4001   0.2365   0.5011  0.1234  0.3433
+original temporal                      0.3881   0.2273   0.4966  0.0833  0.3650
+```
+
+판단:
+
+```text
+overall/app 4-class best: fixed fusion classwise_nonrem0.90_rem0.20
+single-model best: full w20 = temporal_w20 context20 h64 inverse 1.0x
+fixed fusion은 full w20의 N3를 거의 유지하면서 REM과 4-class Macro/Kappa를 개선한다.
+단점: 2-model ensemble이라 앱 추론 비용/지연이 증가한다.
+```
+
+single-model best 후보는 계속 아래 모델이다.
 
 ```text
 full w20 = temporal_w20 context20 h64 inverse 1.0x
 ```
 
-구성:
+full w20 구성:
 
-- epoch feature CSV: `dreamt_100hz_epoch_features_temporal_w20.csv`
-- temporal transform:
-  - delta lags: `1, 3, 20`
-  - rolling windows: `3, 5, 20`
-- feature count: `157`
-- sequence context: `20` epochs
-- model: 1-layer LSTM
-- hidden size: `64`
-- dropout: `0.4`
-- class weight: `inverse`
-- N3 weight multiplier: `1.0`
-- loss: cross entropy
+```text
+epoch feature CSV: dreamt_100hz_epoch_features_temporal_w20.csv
+temporal transform: delta lags 1,3,20 / rolling windows 3,5,20
+feature count: 157
+sequence context: 20 epochs
+model: 1-layer LSTM, hidden size 64, dropout 0.4
+class weight: inverse, N3 multiplier 1.0
+loss: cross entropy
+```
 
 3-seed 평균 기준 baseline:
 
@@ -330,6 +360,101 @@ distill_w10   0.3105   0.1916   0.3780   0.2225   0.4459  0.0166  0.3841
 distill_w02가 가장 균형은 낫지만 full w20/fixed fusion을 넘지 못해 3-seed 확장하지 않는다.
 distill_w05/w10은 REM은 회복하지만 N3가 붕괴한다.
 distillation 1차는 중단하고, 다음 성능 향상 테스트 방향을 다시 탐색한다.
+```
+
+### 다음 채팅방 추천 성능 향상 테스트
+
+distillation 1차까지 실패했으므로, 다음 채팅방은 아래 순서로 진행한다.
+
+#### 1. Fixed fusion 배포 후보 검증
+
+목표: 성능 향상보다는 현재 best가 앱에 올릴 수 있는지 판단한다.
+
+확인할 것:
+
+```text
+1. 두 모델 동시 추론 비용/지연 추정
+2. original temporal과 full w20의 입력 feature 차이 정리
+3. 앱에서 두 feature set을 동시에 계산 가능한지 확인
+4. fixed fusion rule을 런타임 정책으로 구현 가능한지 확인
+```
+
+판단:
+
+```text
+비용/지연이 허용 가능하면 fixed fusion을 앱 후보로 유지한다.
+비용이 크면 single-model 개선 실험으로 계속 간다.
+```
+
+#### 2. Teacher hard-label pseudo-label 학습
+
+1차 distillation은 soft KL이 N3를 충분히 보존하지 못했다. 다음은 fixed fusion teacher의 argmax label을 hard target으로 쓰되, ground truth CE와 섞는다.
+
+후보:
+
+```text
+pseudo_w02: hard ground truth CE + 0.2 * teacher hard CE
+pseudo_w05: hard ground truth CE + 0.5 * teacher hard CE
+pseudo_rem_only: REM target에만 teacher hard label 보조 loss
+```
+
+의도:
+
+```text
+soft KL은 REM 확률을 끌어올리면서 N3 confidence를 흐릴 수 있다.
+hard teacher CE는 fusion decision boundary를 더 직접적으로 전달할 수 있다.
+```
+
+#### 3. REM-specialist correction head
+
+full w20은 유지하고, 별도 작은 REM-vs-nonREM head 또는 calibration layer만 붙여 REM만 보정한다.
+
+후보:
+
+```text
+full w20 encoder frozen + REM binary calibration
+full w20 logits + learned per-class bias/temperature on validation
+REM threshold tuning using validation only
+```
+
+주의:
+
+```text
+test를 보고 threshold를 고르면 안 된다.
+validation에서 threshold/calibration을 선택하고 test는 한 번만 확인한다.
+```
+
+#### 4. Temporal policy post-processing
+
+모델 성능 자체가 아니라 앱 출력 정책으로 REM/N3 안정성을 개선한다. 이미 prediction probabilities가 있으므로 causal policy를 다시 평가할 수 있다.
+
+후보:
+
+```text
+fixed fusion raw
+fixed fusion + causal probability moving average 3/5
+fixed fusion + transition guard for REM/N3
+full w20 + REM-biased causal smoothing
+```
+
+#### 5. 더 큰 단일 모델은 마지막에
+
+feature/loss 실험보다 비용이 크므로 후순위로 둔다.
+
+후보:
+
+```text
+full w20 h96 또는 h128 재확인
+2-layer LSTM small dropout
+TCN/GRU 재비교는 필요할 때만
+```
+
+우선순위 결론:
+
+```text
+다음 채팅방 1순위: fixed fusion 배포 가능성/비용 확인
+다음 채팅방 2순위: teacher hard-label pseudo-label 학습 구현 및 seed42
+다음 채팅방 3순위: REM calibration/threshold 정책 평가
 ```
 
 판단 기준:
