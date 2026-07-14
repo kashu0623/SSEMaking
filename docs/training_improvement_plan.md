@@ -429,6 +429,30 @@ src/sse_sleep/train_lstm.py
 scripts/run_pseudo_label_colab.sh
 ```
 
+seed42 결과:
+
+```text
+variant          5 Macro  5 Kappa  4 Macro  4 Kappa  Wake    N3      REM
+pseudo_w02       0.3091   0.1900   0.3796   0.2224   0.4802  0.0331  0.3556
+pseudo_w05       0.3060   0.1878   0.3797   0.2302   0.4781  0.0127  0.3639
+pseudo_rem_only  0.2894   0.1556   0.3619   0.1897   0.4281  0.0449  0.3429
+```
+
+결론:
+
+```text
+REM을 조금 회복하는 후보도 있지만 N3가 크게 붕괴한다.
+3-seed 확장하지 않고 중단한다.
+다음은 validation 기반 REM threshold/calibration을 학습 없이 평가한다.
+```
+
+구현:
+
+```text
+src/sse_sleep/evaluate_rem_threshold.py
+scripts/run_rem_threshold_colab.sh
+```
+
 ### 0.5. Full w20 후속 학습 후보
 
 Fusion에서 상보성이 보이면 full w20 단일 모델 쪽 후속 후보를 seed42로 확인한다.

@@ -429,6 +429,23 @@ Colab 실행:
 !bash scripts/run_pseudo_label_colab.sh
 ```
 
+Pseudo-label seed42 결과:
+
+```text
+variant          5 Macro  5 Kappa  4 Macro  4 Kappa  Wake    N3      REM
+pseudo_w02       0.3091   0.1900   0.3796   0.2224   0.4802  0.0331  0.3556
+pseudo_w05       0.3060   0.1878   0.3797   0.2302   0.4781  0.0127  0.3639
+pseudo_rem_only  0.2894   0.1556   0.3619   0.1897   0.4281  0.0449  0.3429
+```
+
+해석:
+
+```text
+pseudo_w05는 REM이 full w20 seed42 0.3646 근처까지 회복되지만 N3가 0.0127로 붕괴한다.
+pseudo_w02와 pseudo_rem_only도 N3/4-class가 낮아 3-seed 확장하지 않는다.
+teacher hard-label pseudo-label 1차는 중단한다.
+```
+
 의도:
 
 ```text
@@ -446,6 +463,27 @@ full w20은 유지하고, 별도 작은 REM-vs-nonREM head 또는 calibration la
 full w20 encoder frozen + REM binary calibration
 full w20 logits + learned per-class bias/temperature on validation
 REM threshold tuning using validation only
+```
+
+구현/실행:
+
+```text
+src/sse_sleep/evaluate_rem_threshold.py
+scripts/run_rem_threshold_colab.sh
+```
+
+Colab seed42 실행:
+
+```bash
+%cd /content/SSE
+!git pull
+!bash scripts/run_rem_threshold_colab.sh
+```
+
+fixed fusion에도 같은 policy를 진단하려면:
+
+```bash
+!MODEL=fixed_fusion bash scripts/run_rem_threshold_colab.sh
 ```
 
 주의:
