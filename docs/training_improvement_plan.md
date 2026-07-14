@@ -419,6 +419,16 @@ pseudo_w05: ground truth CE + 0.5 * teacher hard CE
 pseudo_rem_only: REM target에만 teacher hard label 보조 loss
 ```
 
+구현:
+
+```text
+src/sse_sleep/train_lstm.py
+  --teacher-hard-weight
+  --teacher-hard-mode all|rem_only
+
+scripts/run_pseudo_label_colab.sh
+```
+
 ### 0.5. Full w20 후속 학습 후보
 
 Fusion에서 상보성이 보이면 full w20 단일 모델 쪽 후속 후보를 seed42로 확인한다.

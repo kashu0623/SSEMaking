@@ -410,6 +410,25 @@ pseudo_w05: hard ground truth CE + 0.5 * teacher hard CE
 pseudo_rem_only: REM target에만 teacher hard label 보조 loss
 ```
 
+현재 repo 구현:
+
+```text
+src/sse_sleep/train_lstm.py
+  --teacher-hard-weight
+  --teacher-hard-mode all|rem_only
+
+scripts/run_pseudo_label_colab.sh
+  seed42 기본 후보: pseudo_w02, pseudo_w05, pseudo_rem_only
+```
+
+Colab 실행:
+
+```bash
+%cd /content/SSE
+!git pull
+!bash scripts/run_pseudo_label_colab.sh
+```
+
 의도:
 
 ```text

@@ -258,6 +258,8 @@ def run_epoch(
     feature_dropout_indices: torch.Tensor | None = None,
     feature_dropout_prob: float = 0.0,
     distill_weight: float = 0.0,
+    teacher_hard_weight: float = 0.0,
+    teacher_hard_mode: str = "all",
 ) -> dict[str, Any]:
     training = optimizer is not None
     model.train(training)
@@ -265,6 +267,7 @@ def run_epoch(
     total_stage_loss = 0.0
     total_aux_loss = 0.0
     total_distill_loss = 0.0
+    total_teacher_hard_loss = 0.0
     total_count = 0
     y_true: list[int] = []
     y_pred: list[int] = []
@@ -296,6 +299,7 @@ def run_epoch(
             loss = stage_loss
             aux_loss = None
             distill_loss = None
+            teacher_hard_loss = None
             if teacher_batch is not None and distill_weight > 0:
                 distill_loss = F.kl_div(
                     F.log_softmax(logits, dim=1),
@@ -303,6 +307,20 @@ def run_epoch(
                     reduction="batchmean",
                 )
                 loss = loss + distill_weight * distill_loss
+            if teacher_batch is not None and teacher_hard_weight > 0:
+                teacher_labels = teacher_batch.argmax(dim=1)
+                teacher_hard_losses = F.cross_entropy(logits, teacher_labels, reduction="none")
+                if teacher_hard_mode == "rem_only":
+                    rem_mask = teacher_labels == STAGE5_NAMES.index("REM")
+                    if rem_mask.any():
+                        teacher_hard_loss = teacher_hard_losses[rem_mask].mean()
+                    else:
+                        teacher_hard_loss = logits.sum() * 0.0
+                elif teacher_hard_mode == "all":
+                    teacher_hard_loss = teacher_hard_losses.mean()
+                else:
+                    raise ValueError(f"Unknown teacher_hard_mode: {teacher_hard_mode}")
+                loss = loss + teacher_hard_weight * teacher_hard_loss
             if aux_criterion is not None and "deep_logits" in outputs and aux_weight > 0:
                 deep_target = (y_batch == STAGE5_NAMES.index("N3")).float()
                 aux_loss = aux_criterion(outputs["deep_logits"], deep_target)
@@ -319,6 +337,8 @@ def run_epoch(
             total_aux_loss += float(aux_loss.detach().cpu()) * batch_size
         if distill_loss is not None:
             total_distill_loss += float(distill_loss.detach().cpu()) * batch_size
+        if teacher_hard_loss is not None:
+            total_teacher_hard_loss += float(teacher_hard_loss.detach().cpu()) * batch_size
         total_count += batch_size
         y_true.extend(y_batch.detach().cpu().numpy().astype(int).tolist())
         y_pred.extend(logits.argmax(dim=1).detach().cpu().numpy().astype(int).tolist())
@@ -330,6 +350,7 @@ def run_epoch(
         "stage_loss": total_stage_loss / max(total_count, 1),
         "aux_loss": total_aux_loss / max(total_count, 1) if aux_criterion is not None and aux_weight > 0 else None,
         "distill_loss": total_distill_loss / max(total_count, 1) if distill_weight > 0 else None,
+        "teacher_hard_loss": total_teacher_hard_loss / max(total_count, 1) if teacher_hard_weight > 0 else None,
         "y_true": y_true,
         "y_pred": y_pred,
     }
@@ -484,6 +505,8 @@ def train_lstm(
     feature_dropout_prob: float,
     teacher_probs_npz: Path | None,
     distill_weight: float,
+    teacher_hard_weight: float,
+    teacher_hard_mode: str,
 ) -> dict[str, Any]:
     if aux_weight < 0:
         raise ValueError(f"aux_weight must be non-negative: {aux_weight}")
@@ -491,6 +514,12 @@ def train_lstm(
         raise ValueError(f"feature_dropout_prob must be in [0, 1): {feature_dropout_prob}")
     if distill_weight < 0:
         raise ValueError(f"distill_weight must be non-negative: {distill_weight}")
+    if teacher_hard_weight < 0:
+        raise ValueError(f"teacher_hard_weight must be non-negative: {teacher_hard_weight}")
+    if teacher_hard_mode not in {"all", "rem_only"}:
+        raise ValueError(f"Unknown teacher_hard_mode: {teacher_hard_mode}")
+    if teacher_probs_npz is None and (distill_weight > 0 or teacher_hard_weight > 0):
+        raise ValueError("--teacher-probs-npz is required when teacher loss weight is positive")
     set_seed(seed)
     arrays = load_npz(npz_path)
     x_train = arrays["X_train"].astype(np.float32)
@@ -502,7 +531,7 @@ def train_lstm(
     feature_names = arrays["feature_names"].astype(str).tolist()
     teacher_train_probs = (
         load_teacher_train_probs(teacher_probs_npz, arrays)
-        if teacher_probs_npz is not None and distill_weight > 0
+        if teacher_probs_npz is not None and (distill_weight > 0 or teacher_hard_weight > 0)
         else None
     )
 
@@ -575,6 +604,8 @@ def train_lstm(
             feature_dropout_indices=feature_dropout_indices,
             feature_dropout_prob=feature_dropout_prob,
             distill_weight=distill_weight,
+            teacher_hard_weight=teacher_hard_weight,
+            teacher_hard_mode=teacher_hard_mode,
         )
         train_loss = train_result["loss"]
         train_true = train_result["y_true"]
@@ -596,6 +627,7 @@ def train_lstm(
             "train_stage_loss": train_result["stage_loss"],
             "train_aux_loss": train_result["aux_loss"],
             "train_distill_loss": train_result["distill_loss"],
+            "train_teacher_hard_loss": train_result["teacher_hard_loss"],
             "train_metrics": json_ready(train_metrics),
             "val_loss": val_result["loss"],
             "val_stage_loss": val_result["stage_loss"],
@@ -646,6 +678,8 @@ def train_lstm(
                     "feature_dropout_count": int(feature_dropout_indices_np.shape[0]),
                     "teacher_probs_npz": None if teacher_probs_npz is None else str(teacher_probs_npz),
                     "distill_weight": distill_weight,
+                    "teacher_hard_weight": teacher_hard_weight,
+                    "teacher_hard_mode": teacher_hard_mode,
                     "feature_names": feature_names,
                     "stage5_names": STAGE5_NAMES,
                 },
@@ -708,6 +742,8 @@ def train_lstm(
             "feature_dropout_count": int(feature_dropout_indices_np.shape[0]),
             "teacher_probs_npz": None if teacher_probs_npz is None else str(teacher_probs_npz),
             "distill_weight": distill_weight,
+            "teacher_hard_weight": teacher_hard_weight,
+            "teacher_hard_mode": teacher_hard_mode,
         },
         "array_shapes": {
             "X_train": list(x_train.shape),
@@ -895,6 +931,18 @@ def main() -> None:
         default=0.0,
         help="Weight for KL(teacher_probs || student_probs) distillation loss on the train split.",
     )
+    parser.add_argument(
+        "--teacher-hard-weight",
+        type=float,
+        default=0.0,
+        help="Weight for hard CE loss against argmax teacher labels on the train split.",
+    )
+    parser.add_argument(
+        "--teacher-hard-mode",
+        choices=("all", "rem_only"),
+        default="all",
+        help="Apply teacher hard CE to all samples or only samples whose teacher label is REM.",
+    )
     args = parser.parse_args()
 
     report = train_lstm(
@@ -925,6 +973,8 @@ def main() -> None:
         feature_dropout_prob=args.feature_dropout_prob,
         teacher_probs_npz=args.teacher_probs_npz,
         distill_weight=args.distill_weight,
+        teacher_hard_weight=args.teacher_hard_weight,
+        teacher_hard_mode=args.teacher_hard_mode,
     )
     print(json.dumps({"best_epoch": report["best_epoch"], "final_test": report["final_test"]}, indent=2, ensure_ascii=False))
 
