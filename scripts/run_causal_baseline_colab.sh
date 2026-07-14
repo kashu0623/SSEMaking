@@ -7,6 +7,9 @@ set -euo pipefail
 #
 # Variants:
 #   temporal_baseline: acc_vm_activity, hr_mean, ibi_mean, temp_mean, bvp_std
+#   bvp_baseline: bvp_std
+#   bvp_cardio_baseline: bvp_std, hr_mean, ibi_mean
+#   bvp_temp_baseline: bvp_std, temp_mean
 #   cardio_baseline: hr_mean, ibi_mean
 #   cardio_temp_baseline: hr_mean, ibi_mean, temp_mean
 #   movement_cardio_temp_baseline: acc_vm_activity, hr_mean, ibi_mean, temp_mean
@@ -14,6 +17,7 @@ set -euo pipefail
 #
 # Examples:
 #   bash scripts/run_causal_baseline_colab.sh
+#   VARIANTS="bvp_baseline bvp_cardio_baseline bvp_temp_baseline" bash scripts/run_causal_baseline_colab.sh
 #   VARIANTS="cardio_baseline" bash scripts/run_causal_baseline_colab.sh
 #   VARIANTS="cardio_temp_baseline" bash scripts/run_causal_baseline_colab.sh
 #   VARIANTS="movement_cardio_temp_baseline" bash scripts/run_causal_baseline_colab.sh
@@ -22,6 +26,7 @@ set -euo pipefail
 OUTPUT_ROOT="${OUTPUT_ROOT:-/content/drive/MyDrive/SSE_outputs}"
 RAW_INPUT_CSV="${RAW_INPUT_CSV:-${OUTPUT_ROOT}/dreamt_100hz_epoch_features.csv}"
 SHORT_TEMPORAL_CSV="${SHORT_TEMPORAL_CSV:-${OUTPUT_ROOT}/dreamt_100hz_epoch_features_temporal.csv}"
+PYTHON_BIN="${PYTHON_BIN:-python}"
 
 CONTEXT_EPOCHS="${CONTEXT_EPOCHS:-20}"
 HIDDEN_SIZE="${HIDDEN_SIZE:-64}"
@@ -34,6 +39,15 @@ features_for_variant() {
   case "${variant}" in
     temporal_baseline | temporal_w20_baseline)
       echo "acc_vm_activity,hr_mean,ibi_mean,temp_mean,bvp_std"
+      ;;
+    bvp_baseline)
+      echo "bvp_std"
+      ;;
+    bvp_cardio_baseline)
+      echo "bvp_std,hr_mean,ibi_mean"
+      ;;
+    bvp_temp_baseline)
+      echo "bvp_std,temp_mean"
       ;;
     cardio_baseline)
       echo "hr_mean,ibi_mean"
@@ -54,7 +68,7 @@ features_for_variant() {
 input_csv_for_variant() {
   local variant="$1"
   case "${variant}" in
-    temporal_baseline | cardio_baseline | cardio_temp_baseline | movement_cardio_temp_baseline)
+    temporal_baseline | bvp_baseline | bvp_cardio_baseline | bvp_temp_baseline | cardio_baseline | cardio_temp_baseline | movement_cardio_temp_baseline)
       echo "${SHORT_TEMPORAL_CSV}"
       ;;
     temporal_w20_baseline)
@@ -71,7 +85,7 @@ build_short_temporal_csv() {
   local summary_path="${OUTPUT_ROOT}/dreamt_100hz_temporal_features_summary.json"
   if [[ ! -f "${SHORT_TEMPORAL_CSV}" ]]; then
     echo "=== Build short temporal feature CSV ==="
-    PYTHONPATH=src python -m sse_sleep.add_temporal_features \
+    PYTHONPATH=src "${PYTHON_BIN}" -m sse_sleep.add_temporal_features \
       --input-csv "${RAW_INPUT_CSV}" \
       --out-csv "${SHORT_TEMPORAL_CSV}" \
       --summary-out "${summary_path}"
@@ -94,7 +108,7 @@ build_variant_csv() {
 
   if [[ ! -f "${out_csv}" ]]; then
     echo "=== Add causal baseline features: ${variant} ==="
-    PYTHONPATH=src python -m sse_sleep.add_causal_baseline_features \
+    PYTHONPATH=src "${PYTHON_BIN}" -m sse_sleep.add_causal_baseline_features \
       --input-csv "${input_csv}" \
       --out-csv "${out_csv}" \
       --summary-out "${summary_path}" \
@@ -131,7 +145,7 @@ train_variant_seed() {
 
   if [[ ! -f "${npz_path}" ]]; then
     echo "=== Build ${variant} context${CONTEXT_EPOCHS} NPZ for seed ${seed} ==="
-    PYTHONPATH=src python -m sse_sleep.build_npz_dataset \
+    PYTHONPATH=src "${PYTHON_BIN}" -m sse_sleep.build_npz_dataset \
       --input-csv "${OUTPUT_ROOT}/dreamt_100hz_epoch_features_${variant}.csv" \
       --out "${npz_path}" \
       --summary-out "${summary_path}" \
@@ -140,7 +154,7 @@ train_variant_seed() {
   fi
 
   echo "=== Train ${variant}, seed ${seed} ==="
-  PYTHONPATH=src python -m sse_sleep.train_lstm \
+  PYTHONPATH=src "${PYTHON_BIN}" -m sse_sleep.train_lstm \
     --npz "${npz_path}" \
     --out-dir "${out_dir}" \
     --hidden-size "${HIDDEN_SIZE}" \
@@ -183,5 +197,5 @@ if [[ "${#summary_args[@]}" -gt 0 ]]; then
       fi
     fi
   done
-  PYTHONPATH=src python -m sse_sleep.summarize_lstm_metrics "${summary_args[@]}"
+  PYTHONPATH=src "${PYTHON_BIN}" -m sse_sleep.summarize_lstm_metrics "${summary_args[@]}"
 fi

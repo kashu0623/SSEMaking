@@ -130,7 +130,7 @@ movement_cardio_temp_baseline: REM/Wake/Kappa 좋지만 N3가 거의 붕괴
 
 ### 다음 채팅방 우선 작업
 
-다음은 `bvp_std` causal baseline의 역할을 분리해서 확인한다. 아직 스크립트에 아래 variant들은 추가되어 있지 않으므로, 먼저 `scripts/run_causal_baseline_colab.sh`의 `features_for_variant`와 `input_csv_for_variant`에 variant를 추가해야 한다.
+다음은 `bvp_std` causal baseline의 역할을 분리해서 확인한다. 아래 variant들은 `scripts/run_causal_baseline_colab.sh`의 `features_for_variant`와 `input_csv_for_variant`에 추가되어 있다.
 
 우선 추가/실행할 variant:
 
