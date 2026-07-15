@@ -47,7 +47,7 @@ fusion 평가:
 ```text
 1. specialist_raw_prob_argmax
 2. specialist_raw_logit_argmax
-3. specialist_platt_prob_argmax
+3. specialist_platt_prob_argmax: train split으로 per-stage Platt calibration fit, validation으로 선택
 4. meta_specialists_lr_none / balanced
 5. meta_specialists_plus_base_lr_none / balanced
 ```
@@ -79,7 +79,7 @@ Colab 실행:
 ```text
 fixed fusion classwise_nonrem0.90_rem0.20을 1차 비교 기준으로 둔다.
 raw probability argmax는 calibration 위험을 확인하는 baseline으로 본다.
-실제 후보는 platt calibration 또는 meta-fusion이 fixed fusion 대비 4 Macro/Kappa, REM, N3 균형을 개선하는지로 판단한다.
+실제 후보는 train-fitted Platt calibration 또는 train-fitted meta-fusion을 validation에서 선택했을 때 fixed fusion 대비 4 Macro/Kappa, REM, N3 균형을 개선하는지로 판단한다.
 Wake/N1/N2 중 하나가 크게 무너지면 specialist bank가 전체 stage evidence를 충분히 만들지 못한 것으로 보고 보류한다.
 ```
 

@@ -64,6 +64,13 @@ meta_specialists_plus_base_lr_none / balanced
 
 `meta_specialists_plus_base`는 original temporal, full w20, fixed fusion 확률까지 같이 넣는 logistic meta-fusion이다. raw argmax는 calibration 위험을 보는 baseline이고, 실제 후보는 calibrated/meta-fusion이 fixed fusion보다 4-class Macro/Kappa 및 REM/N3 균형을 개선하는지로 판단한다.
 
+주의:
+
+```text
+Platt calibration과 logistic meta-fusion은 train split에 fit하고 validation split으로 선택한다.
+validation에 fit하고 같은 validation으로 선택하면 점수가 과대평가되므로 사용하지 않는다.
+```
+
 다음 실행:
 
 ```bash

@@ -146,15 +146,15 @@ def normalize_rows(scores: np.ndarray) -> np.ndarray:
     return np.divide(scores, row_sums, out=np.zeros_like(scores), where=row_sums > 0)
 
 
-def fit_platt_calibrators(val_logits: np.ndarray, y_val: np.ndarray) -> list[Any]:
+def fit_platt_calibrators(train_logits: np.ndarray, y_train: np.ndarray) -> list[Any]:
     calibrators = []
     for idx, _stage in enumerate(STAGE5_NAMES):
-        y_binary = (y_val == idx).astype(np.int64)
+        y_binary = (y_train == idx).astype(np.int64)
         if len(np.unique(y_binary)) < 2:
             calibrators.append(None)
             continue
         model = LogisticRegression(max_iter=1000, solver="lbfgs")
-        model.fit(val_logits[:, [idx]], y_binary)
+        model.fit(train_logits[:, [idx]], y_binary)
         calibrators.append(model)
     return calibrators
 
@@ -181,32 +181,24 @@ def build_meta_features(
     return np.concatenate(features, axis=1).astype(np.float32)
 
 
-def load_base_prediction_splits(
+def load_base_prediction_split(
     base_predictions: Sequence[tuple[str, Path]],
-    val_reference: dict[str, Any],
-    test_reference: dict[str, Any],
-) -> tuple[list[tuple[str, dict[str, np.ndarray]]], list[tuple[str, dict[str, np.ndarray]]]]:
-    val_splits: list[tuple[str, dict[str, np.ndarray]]] = []
-    test_splits: list[tuple[str, dict[str, np.ndarray]]] = []
+    reference: dict[str, Any],
+    split: str,
+) -> list[tuple[str, dict[str, np.ndarray]]]:
+    splits: list[tuple[str, dict[str, np.ndarray]]] = []
     for label, path in base_predictions:
-        val_split = load_split(path, "val")
-        test_split = load_split(path, "test")
+        loaded_split = load_split(path, split)
         validate_alignment(
-            {"y_true": val_reference["y_true"], "probs": np.zeros((val_reference["y_true"].shape[0], len(STAGE5_NAMES)))},
-            val_split,
-            "val",
+            {"y_true": reference["y_true"], "probs": np.zeros((reference["y_true"].shape[0], len(STAGE5_NAMES)))},
+            loaded_split,
+            split,
         )
-        validate_alignment(
-            {"y_true": test_reference["y_true"], "probs": np.zeros((test_reference["y_true"].shape[0], len(STAGE5_NAMES)))},
-            test_split,
-            "test",
-        )
-        val_splits.append((label, val_split))
-        test_splits.append((label, test_split))
-    return val_splits, test_splits
+        splits.append((label, loaded_split))
+    return splits
 
 
-def fit_meta_model(x_val: np.ndarray, y_val: np.ndarray, class_weight: str | None) -> Any:
+def fit_meta_model(x_train: np.ndarray, y_train: np.ndarray, class_weight: str | None) -> Any:
     model = make_pipeline(
         StandardScaler(),
         LogisticRegression(
@@ -216,7 +208,7 @@ def fit_meta_model(x_val: np.ndarray, y_val: np.ndarray, class_weight: str | Non
             class_weight=class_weight,
         ),
     )
-    model.fit(x_val, y_val)
+    model.fit(x_train, y_train)
     return model
 
 
@@ -226,11 +218,15 @@ def evaluate_specialist_fusion(
     base_predictions: Sequence[tuple[str, Path]],
     selection_metric: str,
 ) -> dict[str, Any]:
+    train_bank = load_specialist_bank(specialist_predictions, "train")
     val_bank = load_specialist_bank(specialist_predictions, "val")
     test_bank = load_specialist_bank(specialist_predictions, "test")
-    val_base_splits, test_base_splits = load_base_prediction_splits(base_predictions, val_bank, test_bank)
+    train_base_splits = load_base_prediction_split(base_predictions, train_bank, "train")
+    val_base_splits = load_base_prediction_split(base_predictions, val_bank, "val")
+    test_base_splits = load_base_prediction_split(base_predictions, test_bank, "test")
 
     records: list[dict[str, Any]] = []
+    y_train = train_bank["y_true"]
     y_val = val_bank["y_true"]
     y_test = test_bank["y_true"]
 
@@ -264,14 +260,14 @@ def evaluate_specialist_fusion(
         )
     )
 
-    calibrators = fit_platt_calibrators(val_bank["logits"], y_val)
+    calibrators = fit_platt_calibrators(train_bank["logits"], y_train)
     val_calibrated = normalize_rows(apply_platt_calibrators(calibrators, val_bank["logits"]))
     test_calibrated = normalize_rows(apply_platt_calibrators(calibrators, test_bank["logits"]))
     records.append(
         candidate_record(
             name="specialist_platt_prob_argmax",
             kind="specialist_calibrated_argmax",
-            params={"calibration": "per_stage_platt_on_validation"},
+            params={"calibration": "per_stage_platt_on_train"},
             val_y_true=y_val,
             val_pred=val_calibrated.argmax(axis=1).astype(np.int64),
             test_y_true=y_test,
@@ -296,17 +292,18 @@ def evaluate_specialist_fusion(
             )
         )
 
+    specialist_only_train_features = build_meta_features(train_bank["probs"], train_bank["logits"], [])
     specialist_only_val_features = build_meta_features(val_bank["probs"], val_bank["logits"], [])
     specialist_only_test_features = build_meta_features(test_bank["probs"], test_bank["logits"], [])
     for class_weight_label, class_weight in (("none", None), ("balanced", "balanced")):
-        model = fit_meta_model(specialist_only_val_features, y_val, class_weight=class_weight)
+        model = fit_meta_model(specialist_only_train_features, y_train, class_weight=class_weight)
         records.append(
             candidate_record(
                 name=f"meta_specialists_lr_{class_weight_label}",
                 kind="meta_logistic_regression",
                 params={
                     "features": "specialist_logits_probs_logit_probs",
-                    "fit_split": "validation",
+                    "fit_split": "train",
                     "class_weight": class_weight_label,
                 },
                 val_y_true=y_val,
@@ -318,11 +315,12 @@ def evaluate_specialist_fusion(
         )
 
     if val_base_splits:
+        with_base_train_features = build_meta_features(train_bank["probs"], train_bank["logits"], train_base_splits)
         with_base_val_features = build_meta_features(val_bank["probs"], val_bank["logits"], val_base_splits)
         with_base_test_features = build_meta_features(test_bank["probs"], test_bank["logits"], test_base_splits)
         base_labels = [label for label, _split in val_base_splits]
         for class_weight_label, class_weight in (("none", None), ("balanced", "balanced")):
-            model = fit_meta_model(with_base_val_features, y_val, class_weight=class_weight)
+            model = fit_meta_model(with_base_train_features, y_train, class_weight=class_weight)
             records.append(
                 candidate_record(
                     name=f"meta_specialists_plus_base_lr_{class_weight_label}",
@@ -330,7 +328,7 @@ def evaluate_specialist_fusion(
                     params={
                         "features": "specialist_features_plus_base_prediction_features",
                         "base_predictions": base_labels,
-                        "fit_split": "validation",
+                        "fit_split": "train",
                         "class_weight": class_weight_label,
                     },
                     val_y_true=y_val,
