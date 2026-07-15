@@ -9,7 +9,16 @@ from statistics import mean, pstdev
 from typing import Any, Sequence
 
 
-SUMMARY_FIELDS = ("4_macro_f1", "4_kappa", "wake_f1", "n3_f1", "rem_f1")
+SUMMARY_FIELDS = ("4_macro_f1", "4_kappa", "wake_f1", "light_f1", "deep_f1", "rem_f1")
+
+
+def summary_value(record: dict[str, Any], field: str) -> float:
+    summary = record["test"]["summary"]
+    if field in summary:
+        return float(summary[field])
+    if field == "deep_f1" and "n3_f1" in summary:
+        return float(summary["n3_f1"])
+    raise KeyError(field)
 
 
 def load_report(path: Path) -> dict[str, Any]:
@@ -33,7 +42,7 @@ def summarize_records(paths: Sequence[Path]) -> dict[str, Any]:
         if len(records) != expected_count:
             continue
         test_values = {
-            field: [float(record["test"]["summary"][field]) for record in records]
+            field: [summary_value(record, field) for record in records]
             for field in SUMMARY_FIELDS
         }
         summaries[name] = {
@@ -64,14 +73,15 @@ def sort_key(item: tuple[str, dict[str, Any]]) -> tuple[float, float, float]:
 
 def print_table(report: dict[str, Any], top: int) -> None:
     rows = sorted(report["summaries"].items(), key=sort_key, reverse=True)
-    print("| rank | name | val score | 4 Macro | 4 Kappa | Wake | N3 | REM |")
-    print("|---:|---|---:|---:|---:|---:|---:|---:|")
+    print("| rank | name | val score | 4 Macro | 4 Kappa | Wake | Light | Deep | REM |")
+    print("|---:|---|---:|---:|---:|---:|---:|---:|---:|")
     for rank, (name, summary) in enumerate(rows[:top], start=1):
         test_mean = summary["test_mean"]
         print(
             f"| {rank} | {name} | {summary['selection_score_mean']:.4f} | "
             f"{test_mean['4_macro_f1']:.4f} | {test_mean['4_kappa']:.4f} | "
-            f"{test_mean['wake_f1']:.4f} | {test_mean['n3_f1']:.4f} | {test_mean['rem_f1']:.4f} |"
+            f"{test_mean['wake_f1']:.4f} | {test_mean['light_f1']:.4f} | "
+            f"{test_mean['deep_f1']:.4f} | {test_mean['rem_f1']:.4f} |"
         )
 
 

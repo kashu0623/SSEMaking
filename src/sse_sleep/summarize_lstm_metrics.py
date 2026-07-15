@@ -15,9 +15,10 @@ METRIC_KEYS = (
     ("5_kappa", ("final_test", "metrics", "5_class", "cohen_kappa")),
     ("4_macro_f1", ("final_test", "metrics", "4_class", "macro_f1")),
     ("4_kappa", ("final_test", "metrics", "4_class", "cohen_kappa")),
-    ("wake_f1", ("final_test", "metrics", "5_class", "class_wise", "Wake", "f1")),
-    ("n3_f1", ("final_test", "metrics", "5_class", "class_wise", "N3", "f1")),
-    ("rem_f1", ("final_test", "metrics", "5_class", "class_wise", "REM", "f1")),
+    ("wake_f1", ("final_test", "metrics", "4_class", "class_wise", "Wake", "f1")),
+    ("light_f1", ("final_test", "metrics", "4_class", "class_wise", "Light", "f1")),
+    ("deep_f1", ("final_test", "metrics", "4_class", "class_wise", "Deep", "f1")),
+    ("rem_f1", ("final_test", "metrics", "4_class", "class_wise", "REM", "f1")),
 )
 
 
@@ -78,7 +79,8 @@ def print_markdown_table(summaries: dict[str, dict[str, Any]], baseline_label: s
         "4 Macro F1",
         "4 Kappa",
         "Wake F1",
-        "N3 F1",
+        "Light F1",
+        "Deep F1",
         "REM F1",
     ]
     print("| " + " | ".join(headers) + " |")

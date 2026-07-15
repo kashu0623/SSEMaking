@@ -99,9 +99,11 @@ def summarize_metrics(metrics: dict[str, Any]) -> dict[str, float]:
         "5_kappa": float(metrics["5_class"]["cohen_kappa"]),
         "4_macro_f1": float(metrics["4_class"]["macro_f1"]),
         "4_kappa": float(metrics["4_class"]["cohen_kappa"]),
-        "wake_f1": float(metrics["5_class"]["class_wise"]["Wake"]["f1"]),
-        "n3_f1": float(metrics["5_class"]["class_wise"]["N3"]["f1"]),
-        "rem_f1": float(metrics["5_class"]["class_wise"]["REM"]["f1"]),
+        "wake_f1": float(metrics["4_class"]["class_wise"]["Wake"]["f1"]),
+        "light_f1": float(metrics["4_class"]["class_wise"]["Light"]["f1"]),
+        "deep_f1": float(metrics["4_class"]["class_wise"]["Deep"]["f1"]),
+        "n3_f1": float(metrics["4_class"]["class_wise"]["Deep"]["f1"]),
+        "rem_f1": float(metrics["4_class"]["class_wise"]["REM"]["f1"]),
     }
 
 
@@ -210,14 +212,15 @@ def evaluate_prediction_fusion(
 
 def print_top(report: dict[str, Any], limit: int) -> None:
     records = sorted(report["records"], key=lambda item: item["selection_score"], reverse=True)
-    print("| rank | name | val score | 4 Macro | 4 Kappa | Wake | N3 | REM |")
-    print("|---:|---|---:|---:|---:|---:|---:|---:|")
+    print("| rank | name | val score | 4 Macro | 4 Kappa | Wake | Light | Deep | REM |")
+    print("|---:|---|---:|---:|---:|---:|---:|---:|---:|")
     for rank, record in enumerate(records[:limit], start=1):
         summary = record["test"]["summary"]
         print(
             f"| {rank} | {record['name']} | {record['selection_score']:.4f} | "
             f"{summary['4_macro_f1']:.4f} | {summary['4_kappa']:.4f} | "
-            f"{summary['wake_f1']:.4f} | {summary['n3_f1']:.4f} | {summary['rem_f1']:.4f} |"
+            f"{summary['wake_f1']:.4f} | {summary['light_f1']:.4f} | "
+            f"{summary['deep_f1']:.4f} | {summary['rem_f1']:.4f} |"
         )
 
 

@@ -164,14 +164,15 @@ def evaluate_three_model_fusion(
 
 def print_top(report: dict[str, Any], limit: int) -> None:
     records = sorted(report["records"], key=lambda item: item["selection_score"], reverse=True)
-    print("| rank | name | val score | 4 Macro | 4 Kappa | Wake | N3 | REM |")
-    print("|---:|---|---:|---:|---:|---:|---:|---:|")
+    print("| rank | name | val score | 4 Macro | 4 Kappa | Wake | Light | Deep | REM |")
+    print("|---:|---|---:|---:|---:|---:|---:|---:|---:|")
     for rank, record in enumerate(records[:limit], start=1):
         summary = record["test"]["summary"]
         print(
             f"| {rank} | {record['name']} | {record['selection_score']:.4f} | "
             f"{summary['4_macro_f1']:.4f} | {summary['4_kappa']:.4f} | "
-            f"{summary['wake_f1']:.4f} | {summary['n3_f1']:.4f} | {summary['rem_f1']:.4f} |"
+            f"{summary['wake_f1']:.4f} | {summary['light_f1']:.4f} | "
+            f"{summary['deep_f1']:.4f} | {summary['rem_f1']:.4f} |"
         )
 
 

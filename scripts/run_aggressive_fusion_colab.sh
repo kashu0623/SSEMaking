@@ -14,6 +14,7 @@ CONTEXT_EPOCHS="${CONTEXT_EPOCHS:-20}"
 HIDDEN_SIZE="${HIDDEN_SIZE:-64}"
 SEEDS="${SEEDS:-42}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
+RUN_THIRD_VARIANTS="${RUN_THIRD_VARIANTS:-1}"
 
 # Third variants follow the default full-w20 run naming:
 #   lstm_temporal_w20_context20_h64_inverse_${THIRD_VARIANT}
@@ -33,18 +34,20 @@ RUN_TWO_MODEL=1 \
 RUN_THREE_MODEL=0 \
 bash scripts/run_performance_fusion_colab.sh
 
-for variant in "${THIRD_VARIANTS[@]}"; do
-  echo "=== Aggressive 3-model fusion variant: ${variant} ==="
-  SEEDS="${SEEDS}" \
-  PYTHON_BIN="${PYTHON_BIN}" \
-  OUTPUT_ROOT="${OUTPUT_ROOT}" \
-  CONTEXT_EPOCHS="${CONTEXT_EPOCHS}" \
-  HIDDEN_SIZE="${HIDDEN_SIZE}" \
-  RUN_TWO_MODEL=0 \
-  RUN_THREE_MODEL=1 \
-  THIRD_VARIANT="${variant}" \
-  bash scripts/run_performance_fusion_colab.sh
-done
+if [[ "${RUN_THIRD_VARIANTS}" == "1" ]]; then
+  for variant in "${THIRD_VARIANTS[@]}"; do
+    echo "=== Aggressive 3-model fusion variant: ${variant} ==="
+    SEEDS="${SEEDS}" \
+    PYTHON_BIN="${PYTHON_BIN}" \
+    OUTPUT_ROOT="${OUTPUT_ROOT}" \
+    CONTEXT_EPOCHS="${CONTEXT_EPOCHS}" \
+    HIDDEN_SIZE="${HIDDEN_SIZE}" \
+    RUN_TWO_MODEL=0 \
+    RUN_THREE_MODEL=1 \
+    THIRD_VARIANT="${variant}" \
+    bash scripts/run_performance_fusion_colab.sh
+  done
+fi
 
 for item in "${THIRD_PREFIX_CANDIDATES[@]}"; do
   # Accept either LABEL=PREFIX or just PREFIX. The label only controls report names.
