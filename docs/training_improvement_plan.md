@@ -22,6 +22,32 @@ REM F1           0.3650              0.3433         -0.0217
 개선 목표: N3/4-class 이득을 유지하면서 REM F1 하락을 줄이기
 ```
 
+## 2026-07-15 방향 전환
+
+팀 회의 결과, 연산량에 상관하지 않고 fusion을 계속 가져가도 되며 성능 향상에 집중하기로 했다. 따라서 single-model 개선 실험은 후순위로 두고, fixed fusion을 기준으로 더 공격적인 fusion 탐색을 진행한다.
+
+다음 실행:
+
+```bash
+%cd /content/SSE
+!git pull
+!bash scripts/run_performance_fusion_colab.sh
+```
+
+실행 내용:
+
+```text
+1. original temporal + full w20 dense 2-model class-wise fusion
+2. original temporal + full w20 + remaux_w05 3-model class-wise fusion
+```
+
+다른 세 번째 모델을 넣는 예:
+
+```bash
+!THIRD_VARIANT="remaux_w05_sel4combo" bash scripts/run_performance_fusion_colab.sh
+!THIRD_MODEL_PREFIX="lstm_temporal_w20_context20_inverse_capacity_h96" bash scripts/run_performance_fusion_colab.sh
+```
+
 ## 이전 기준 모델
 
 ```bash
