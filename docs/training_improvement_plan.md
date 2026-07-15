@@ -26,6 +26,44 @@ REM F1           0.3650              0.3433         -0.0217
 
 팀 회의 결과, 연산량에 상관하지 않고 fusion을 계속 가져가도 되며 성능 향상에 집중하기로 했다. 따라서 single-model 개선 실험은 후순위로 두고, fixed fusion을 기준으로 더 공격적인 fusion 탐색을 진행한다.
 
+## 2026-07-15 추가: 5-stage one-vs-rest specialist bank
+
+REM/N3 specialist만 붙이면 Wake/N1/N2의 낮은 정답률은 그대로 남을 수 있으므로, 5개 stage 전체에 대해 one-vs-rest specialist를 학습하고 validation 기반 fusion으로 최종 stage를 결정하는 실험을 추가한다.
+
+구현:
+
+```text
+src/sse_sleep/train_binary_specialist.py
+src/sse_sleep/evaluate_specialist_fusion.py
+scripts/run_ovr_specialist_fusion_colab.sh
+```
+
+실행:
+
+```bash
+%cd /content/SSE
+!git pull
+!bash scripts/run_ovr_specialist_fusion_colab.sh
+```
+
+3-seed:
+
+```bash
+!SEEDS="42 7 123" bash scripts/run_ovr_specialist_fusion_colab.sh
+```
+
+평가 후보:
+
+```text
+specialist_raw_prob_argmax
+specialist_raw_logit_argmax
+specialist_platt_prob_argmax
+meta_specialists_lr_none / balanced
+meta_specialists_plus_base_lr_none / balanced
+```
+
+`meta_specialists_plus_base`는 original temporal, full w20, fixed fusion 확률까지 같이 넣는 logistic meta-fusion이다. raw argmax는 calibration 위험을 보는 baseline이고, 실제 후보는 calibrated/meta-fusion이 fixed fusion보다 4-class Macro/Kappa 및 REM/N3 균형을 개선하는지로 판단한다.
+
 다음 실행:
 
 ```bash

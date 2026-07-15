@@ -10,6 +10,79 @@
 
 팀 회의 결과, 연산량에 상관하지 않고 fusion을 계속 가져가도 되며 성능 향상에 집중하기로 했다. 따라서 single-model 압축/개선은 우선순위를 낮추고, fixed fusion을 기준으로 더 공격적인 fusion 탐색을 진행한다.
 
+### 2026-07-15 추가 방향: 5개 one-vs-rest specialist bank
+
+논의 결과, REM/N3만 보정하는 partial specialist는 나머지 Wake/N1/N2 성능 한계를 그대로 남길 수 있으므로, 5개 sleep stage 전체를 one-vs-rest specialist로 학습하고 specialist evidence를 fusion하는 실험을 먼저 추가한다.
+
+구현:
+
+```text
+src/sse_sleep/train_binary_specialist.py
+src/sse_sleep/evaluate_specialist_fusion.py
+scripts/run_ovr_specialist_fusion_colab.sh
+```
+
+각 specialist:
+
+```text
+Wake vs rest
+N1 vs rest
+N2 vs rest
+N3 vs rest
+REM vs rest
+```
+
+기본 입력/모델:
+
+```text
+dataset: full w20 NPZ = dreamt_100hz_temporal_w20_lstm_context20.npz
+model: 1-layer LSTM, hidden size 64, dropout 0.4
+loss: 2-class cross entropy
+class_weight_mode: inverse
+specialist checkpoint selection: positive_f1
+```
+
+fusion 평가:
+
+```text
+1. specialist_raw_prob_argmax
+2. specialist_raw_logit_argmax
+3. specialist_platt_prob_argmax
+4. meta_specialists_lr_none / balanced
+5. meta_specialists_plus_base_lr_none / balanced
+```
+
+`meta_specialists_plus_base`는 specialist evidence에 아래 5-class baseline 확률도 함께 넣는다.
+
+```text
+original temporal
+full w20
+fixed fusion classwise_nonrem0.90_rem0.20
+```
+
+Colab 실행:
+
+```bash
+%cd /content/SSE
+!git pull
+!bash scripts/run_ovr_specialist_fusion_colab.sh
+```
+
+3-seed 확장:
+
+```bash
+!SEEDS="42 7 123" bash scripts/run_ovr_specialist_fusion_colab.sh
+```
+
+판단 기준:
+
+```text
+fixed fusion classwise_nonrem0.90_rem0.20을 1차 비교 기준으로 둔다.
+raw probability argmax는 calibration 위험을 확인하는 baseline으로 본다.
+실제 후보는 platt calibration 또는 meta-fusion이 fixed fusion 대비 4 Macro/Kappa, REM, N3 균형을 개선하는지로 판단한다.
+Wake/N1/N2 중 하나가 크게 무너지면 specialist bank가 전체 stage evidence를 충분히 만들지 못한 것으로 보고 보류한다.
+```
+
 현재 유지할 기준:
 
 ```text
