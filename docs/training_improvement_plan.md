@@ -114,6 +114,42 @@ raw argmax는 N3는 비슷하지만 REM/Wake/4-class가 낮다.
 3. original temporal + full w20 + remaux_w05_sel4combo 3-model class-wise fusion
 ```
 
+Seed42 결과:
+
+```text
+validation-selected:
+variant                         selected                                      val score  test 4M  test 4K  Wake    N3      REM
+dense2                          classwise_nonrem1.00_rem0.50                 0.7071     0.4116   0.2536   0.5030  0.1041  0.3868
+3-model remaux_w05              classwise3_nonrem_p0.75_s0.20_rem_p0.40_s0.20 0.7181     0.4152   0.2611   0.5118  0.1021  0.3955
+3-model remaux_w05_sel4combo    classwise3_nonrem_p0.75_s0.20_rem_p0.40_s0.20 0.7181     0.4152   0.2611   0.5118  0.1021  0.3955
+fixed reference                 classwise_nonrem0.90_rem0.20                 0.6971     0.4183   0.2665   0.5059  0.1033  0.4075
+```
+
+결론:
+
+```text
+remaux_w05 기반 3-model fusion은 validation-selected 기준으로 fixed reference를 넘지 못한다.
+test oracle best는 3-model classwise3_nonrem_p0.80_s0.10_rem_p0.10_s0.05이며 fixed보다 약간 높지만, validation score가 낮아 채택하지 않는다.
+다음 성능 향상 후보는 remaux가 아니라 capacity/h96/h128 등 더 강한 third model을 학습한 뒤 3-model fusion에 투입하는 방향이 낫다.
+```
+
+다음 목표:
+
+```text
+capacity 모델(h96/h128/layers2_h64)을 학습한 뒤 third model로 투입해 3-model fusion을 재평가한다.
+목표는 fixed reference classwise_nonrem0.90_rem0.20을 validation-selected 기준으로 넘는 것이다.
+4-class 비교에는 Wake/Light/Deep/REM F1을 모두 포함한다.
+```
+
+다음 Colab 실행:
+
+```bash
+%cd /content/SSE
+!git pull
+!bash scripts/run_full_w20_capacity_colab.sh
+!THIRD_PREFIX_CANDIDATES="capacity_h96=lstm_temporal_w20_context20_inverse_capacity_h96 capacity_h128=lstm_temporal_w20_context20_inverse_capacity_h128 capacity_layers2_h64=lstm_temporal_w20_context20_inverse_capacity_layers2_h64" bash scripts/run_aggressive_fusion_colab.sh
+```
+
 다른 세 번째 모델을 넣는 예:
 
 ```bash

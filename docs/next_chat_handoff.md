@@ -134,6 +134,59 @@ single-model best: full w20
 3. original temporal + full w20 + remaux_w05_sel4combo 3-model class-wise fusion
 ```
 
+Seed42 aggressive fusion 결과:
+
+```text
+validation-selected:
+variant                         selected                                      val score  test 4M  test 4K  Wake    N3      REM
+dense2                          classwise_nonrem1.00_rem0.50                 0.7071     0.4116   0.2536   0.5030  0.1041  0.3868
+3-model remaux_w05              classwise3_nonrem_p0.75_s0.20_rem_p0.40_s0.20 0.7181     0.4152   0.2611   0.5118  0.1021  0.3955
+3-model remaux_w05_sel4combo    classwise3_nonrem_p0.75_s0.20_rem_p0.40_s0.20 0.7181     0.4152   0.2611   0.5118  0.1021  0.3955
+fixed reference                 classwise_nonrem0.90_rem0.20                 0.6971     0.4183   0.2665   0.5059  0.1033  0.4075
+```
+
+해석:
+
+```text
+3-model validation-selected 후보는 validation score는 높지만 seed42 test에서는 fixed reference를 넘지 못한다.
+remaux_w05와 remaux_w05_sel4combo 결과가 동일하므로 실제 prediction/checkpoint가 같거나 동일한 성능 경로로 보인다.
+test oracle 관점 best는 3-model classwise3_nonrem_p0.80_s0.10_rem_p0.10_s0.05로 4M 0.4202 / 4K 0.2696 / Wake 0.5066 / N3 0.1074 / REM 0.4088이지만, val score가 0.6883으로 fixed reference보다 낮아 validation-selected policy로는 채택할 수 없다.
+따라서 remaux_w05 기반 3-model fusion은 1차로 fixed reference를 대체하지 않는다.
+```
+
+다음 목표:
+
+```text
+capacity 모델(h96/h128/layers2_h64)을 먼저 학습한 뒤, 이 모델들을 third model로 넣어 3-model fusion을 다시 평가한다.
+remaux 계열은 Wake만 일부 좋아지고 Light/Deep/REM/4 Macro/4 Kappa가 fixed reference보다 낮아 다음 우선순위에서 제외한다.
+목표는 fixed reference classwise_nonrem0.90_rem0.20을 validation-selected 기준으로 넘는 것이다.
+```
+
+다음 Colab 실행:
+
+```bash
+%cd /content/SSE
+!git pull
+
+# 1. capacity third-model 후보 학습
+!bash scripts/run_full_w20_capacity_colab.sh
+
+# 2. 학습된 capacity 모델들을 3-model fusion에 투입
+!THIRD_PREFIX_CANDIDATES="capacity_h96=lstm_temporal_w20_context20_inverse_capacity_h96 capacity_h128=lstm_temporal_w20_context20_inverse_capacity_h128 capacity_layers2_h64=lstm_temporal_w20_context20_inverse_capacity_layers2_h64" bash scripts/run_aggressive_fusion_colab.sh
+```
+
+판정 기준:
+
+```text
+기준: fixed reference classwise_nonrem0.90_rem0.20
+seed42 test: 4M 0.4183 / 4K 0.2665 / Wake 0.5059 / Light 0.6565 / Deep 0.1033 / REM 0.4075
+
+채택 후보는 validation-selected policy여야 한다.
+test oracle로만 좋아 보이는 후보는 채택하지 않는다.
+4-class 비교에는 Wake/Light/Deep/REM F1을 모두 포함한다.
+fixed보다 4 Macro/Kappa가 낮거나 REM/Light가 떨어지면 성능 향상 후보로 보지 않는다.
+```
+
 3-model fusion에서 다른 suffix 후보를 세 번째 모델로 보려면:
 
 ```bash
