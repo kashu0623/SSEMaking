@@ -103,7 +103,7 @@ raw argmax는 N3는 비슷하지만 REM/Wake/4-class가 낮다.
 ```bash
 %cd /content/SSE
 !git pull
-!bash scripts/run_performance_fusion_colab.sh
+!bash scripts/run_aggressive_fusion_colab.sh
 ```
 
 실행 내용:
@@ -111,13 +111,14 @@ raw argmax는 N3는 비슷하지만 REM/Wake/4-class가 낮다.
 ```text
 1. original temporal + full w20 dense 2-model class-wise fusion
 2. original temporal + full w20 + remaux_w05 3-model class-wise fusion
+3. original temporal + full w20 + remaux_w05_sel4combo 3-model class-wise fusion
 ```
 
 다른 세 번째 모델을 넣는 예:
 
 ```bash
-!THIRD_VARIANT="remaux_w05_sel4combo" bash scripts/run_performance_fusion_colab.sh
-!THIRD_MODEL_PREFIX="lstm_temporal_w20_context20_inverse_capacity_h96" bash scripts/run_performance_fusion_colab.sh
+!THIRD_VARIANTS="remaux_w05 remaux_w05_sel4combo other_variant" bash scripts/run_aggressive_fusion_colab.sh
+!THIRD_PREFIX_CANDIDATES="capacity_h96=lstm_temporal_w20_context20_inverse_capacity_h96" bash scripts/run_aggressive_fusion_colab.sh
 ```
 
 ## 이전 기준 모델

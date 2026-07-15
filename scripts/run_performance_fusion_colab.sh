@@ -13,6 +13,7 @@ CONTEXT_EPOCHS="${CONTEXT_EPOCHS:-20}"
 HIDDEN_SIZE="${HIDDEN_SIZE:-64}"
 SEEDS=(${SEEDS:-42})
 PYTHON_BIN="${PYTHON_BIN:-python}"
+RUN_TWO_MODEL="${RUN_TWO_MODEL:-1}"
 RUN_THREE_MODEL="${RUN_THREE_MODEL:-1}"
 THIRD_VARIANT="${THIRD_VARIANT:-remaux_w05}"
 THIRD_MODEL_PREFIX="${THIRD_MODEL_PREFIX:-}"
@@ -111,16 +112,18 @@ for seed in "${SEEDS[@]}"; do
     three_out_json="${OUTPUT_ROOT}/fusion3_original_full_w20_${THIRD_VARIANT}_context${CONTEXT_EPOCHS}_h${HIDDEN_SIZE}_seed${seed}.json"
   fi
 
-  echo "=== Dense 2-model fusion, seed ${seed} ==="
-  PYTHONPATH=src "${PYTHON_BIN}" -m sse_sleep.evaluate_prediction_fusion \
-    --base-predictions "${original_predictions}" \
-    --candidate-predictions "${w20_predictions}" \
-    --out-json "${two_out_json}" \
-    --classwise-non-rem-alphas "0.75,0.80,0.85,0.90,0.92,0.95,0.98,1.00" \
-    --classwise-rem-alphas "0,0.05,0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50" \
-    --selection-metric 4_macro_f1_plus_4_kappa \
-    --top 20
-  two_model_reports+=("${two_out_json}")
+  if [[ "${RUN_TWO_MODEL}" == "1" ]]; then
+    echo "=== Dense 2-model fusion, seed ${seed} ==="
+    PYTHONPATH=src "${PYTHON_BIN}" -m sse_sleep.evaluate_prediction_fusion \
+      --base-predictions "${original_predictions}" \
+      --candidate-predictions "${w20_predictions}" \
+      --out-json "${two_out_json}" \
+      --classwise-non-rem-alphas "0.75,0.80,0.85,0.90,0.92,0.95,0.98,1.00" \
+      --classwise-rem-alphas "0,0.05,0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50" \
+      --selection-metric 4_macro_f1_plus_4_kappa \
+      --top 20
+    two_model_reports+=("${two_out_json}")
+  fi
 
   if [[ "${RUN_THREE_MODEL}" == "1" ]]; then
     if [[ ! -f "${third_model_dir}/lstm_best.pt" && ! -f "${third_predictions}" ]]; then

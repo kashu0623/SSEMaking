@@ -123,7 +123,7 @@ single-model best: full w20
 ```bash
 %cd /content/SSE
 !git pull
-!bash scripts/run_performance_fusion_colab.sh
+!bash scripts/run_aggressive_fusion_colab.sh
 ```
 
 위 스크립트는 아래를 수행한다.
@@ -131,18 +131,19 @@ single-model best: full w20
 ```text
 1. original temporal + full w20 dense 2-model class-wise fusion
 2. original temporal + full w20 + remaux_w05 3-model class-wise fusion
+3. original temporal + full w20 + remaux_w05_sel4combo 3-model class-wise fusion
 ```
 
-3-model fusion에서 다른 후보를 세 번째 모델로 보려면:
+3-model fusion에서 다른 suffix 후보를 세 번째 모델로 보려면:
 
 ```bash
-!THIRD_VARIANT="remaux_w05_sel4combo" bash scripts/run_performance_fusion_colab.sh
+!THIRD_VARIANTS="remaux_w05 remaux_w05_sel4combo other_variant" bash scripts/run_aggressive_fusion_colab.sh
 ```
 
 모델 디렉터리 prefix가 다른 후보를 넣으려면:
 
 ```bash
-!THIRD_MODEL_PREFIX="lstm_temporal_w20_context20_inverse_capacity_h96" bash scripts/run_performance_fusion_colab.sh
+!THIRD_PREFIX_CANDIDATES="capacity_h96=lstm_temporal_w20_context20_inverse_capacity_h96 capacity_h128=lstm_temporal_w20_context20_inverse_capacity_h128" bash scripts/run_aggressive_fusion_colab.sh
 ```
 
 현재 overall/app 4-class 관점 best 후보는 아래 fixed class-wise fusion이다.
