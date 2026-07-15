@@ -77,6 +77,27 @@ Platt calibration과 logistic meta-fusion은 train split에 fit하고 validation
 validation에 fit하고 같은 validation으로 선택하면 점수가 과대평가되므로 사용하지 않는다.
 ```
 
+Seed42 결과:
+
+```text
+variant                           val score  test 4M  test 4K  Wake    N3      REM
+specialist_platt_prob_argmax      0.8043     0.3642   0.2194   0.4675  0.0160  0.2739
+specialist_raw_prob_argmax        0.7838     0.3795   0.2064   0.4670  0.1069  0.2768
+meta_specialists_plus_base_bal    0.7361     0.3767   0.1959   0.4560  0.1132  0.2688
+base full w20                     0.6988     0.4036   0.2401   0.5011  0.1043  0.3646
+base fixed fusion                 0.6971     0.4183   0.2665   0.5059  0.1033  0.4075
+base original temporal            0.5950     0.4036   0.2633   0.4895  0.0513  0.4158
+```
+
+결론:
+
+```text
+5-stage one-vs-rest specialist bank는 seed42에서 fixed fusion을 넘지 못했다.
+Platt/top validation 후보는 test N3와 REM이 무너진다.
+raw argmax는 N3는 비슷하지만 REM/Wake/4-class가 낮다.
+따라서 1차 specialist bank는 3-seed 확장하지 않는다.
+```
+
 다음 실행:
 
 ```bash
