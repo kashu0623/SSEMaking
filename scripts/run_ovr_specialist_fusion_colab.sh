@@ -19,6 +19,7 @@ PYTHON_BIN="${PYTHON_BIN:-python}"
 SPECIALIST_SELECTION_METRIC="${SPECIALIST_SELECTION_METRIC:-positive_f1}"
 SPECIALIST_CLASS_WEIGHT_MODE="${SPECIALIST_CLASS_WEIGHT_MODE:-inverse}"
 SPECIALIST_TRAIN_SAMPLER="${SPECIALIST_TRAIN_SAMPLER:-none}"
+TRAIN_SPECIALISTS="${TRAIN_SPECIALISTS:-1}"
 FUSION_SELECTION_METRIC="${FUSION_SELECTION_METRIC:-4_macro_f1_plus_4_kappa}"
 NON_REM_ALPHA="${NON_REM_ALPHA:-0.9}"
 REM_ALPHA="${REM_ALPHA:-0.2}"
@@ -117,17 +118,22 @@ for seed in "${SEEDS[@]}"; do
   specialist_prediction_paths=()
   for stage in "${STAGES[@]}"; do
     out_dir="$(specialist_out_dir "${stage}" "${seed}")"
-    echo "=== Train one-vs-rest specialist ${stage}, seed ${seed} ==="
-    PYTHONPATH=src "${PYTHON_BIN}" -m sse_sleep.train_binary_specialist \
-      --npz "${w20_npz}" \
-      --out-dir "${out_dir}" \
-      --target-stage "${stage}" \
-      --hidden-size "${HIDDEN_SIZE}" \
-      --dropout "${DROPOUT}" \
-      --class-weight-mode "${SPECIALIST_CLASS_WEIGHT_MODE}" \
-      --train-sampler "${SPECIALIST_TRAIN_SAMPLER}" \
-      --selection-metric "${SPECIALIST_SELECTION_METRIC}" \
-      --seed "${seed}"
+    if [[ "${TRAIN_SPECIALISTS}" == "1" ]]; then
+      echo "=== Train one-vs-rest specialist ${stage}, seed ${seed} ==="
+      PYTHONPATH=src "${PYTHON_BIN}" -m sse_sleep.train_binary_specialist \
+        --npz "${w20_npz}" \
+        --out-dir "${out_dir}" \
+        --target-stage "${stage}" \
+        --hidden-size "${HIDDEN_SIZE}" \
+        --dropout "${DROPOUT}" \
+        --class-weight-mode "${SPECIALIST_CLASS_WEIGHT_MODE}" \
+        --train-sampler "${SPECIALIST_TRAIN_SAMPLER}" \
+        --selection-metric "${SPECIALIST_SELECTION_METRIC}" \
+        --seed "${seed}"
+    elif [[ ! -f "${out_dir}/specialist_predictions.npz" ]]; then
+      echo "Missing specialist predictions with TRAIN_SPECIALISTS=0: ${out_dir}/specialist_predictions.npz" >&2
+      exit 1
+    fi
     specialist_prediction_paths+=("${out_dir}/specialist_predictions.npz")
   done
 

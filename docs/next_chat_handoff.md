@@ -74,6 +74,12 @@ Colab 실행:
 !SEEDS="42 7 123" bash scripts/run_ovr_specialist_fusion_colab.sh
 ```
 
+이미 specialist 학습 산출물이 있고 fusion evaluator만 다시 돌릴 때:
+
+```bash
+!TRAIN_SPECIALISTS=0 bash scripts/run_ovr_specialist_fusion_colab.sh
+```
+
 판단 기준:
 
 ```text

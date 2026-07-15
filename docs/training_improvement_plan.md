@@ -52,6 +52,12 @@ scripts/run_ovr_specialist_fusion_colab.sh
 !SEEDS="42 7 123" bash scripts/run_ovr_specialist_fusion_colab.sh
 ```
 
+이미 specialist 산출물이 있을 때 evaluator만 다시 실행:
+
+```bash
+!TRAIN_SPECIALISTS=0 bash scripts/run_ovr_specialist_fusion_colab.sh
+```
+
 평가 후보:
 
 ```text
