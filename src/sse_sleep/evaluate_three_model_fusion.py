@@ -11,9 +11,11 @@ import numpy as np
 
 from .evaluate_prediction_fusion import (
     candidate_record,
+    classwise_fusion,
     evaluate_probs,
     load_split,
     parse_float_list,
+    select_best_record,
     validate_alignment,
 )
 from .labels import STAGE5_NAMES, STAGE5_TO_ID
@@ -65,6 +67,12 @@ def evaluate_three_model_fusion(
     rem_primary_alphas: Sequence[float],
     rem_secondary_alphas: Sequence[float],
     selection_metric: str,
+    selection_policy: str,
+    fixed_min_score_delta: float,
+    fixed_rem_tolerance: float,
+    fixed_light_tolerance: float,
+    fixed_wake_tolerance: float,
+    fixed_deep_tolerance: float,
 ) -> dict[str, Any]:
     base_val = load_split(base_predictions, "val")
     base_test = load_split(base_predictions, "test")
@@ -93,6 +101,24 @@ def evaluate_three_model_fusion(
                 selection_metric=selection_metric,
             )
         )
+
+    fixed_class_alphas = np.full(len(STAGE5_NAMES), 0.90, dtype=np.float32)
+    fixed_class_alphas[STAGE5_TO_ID["REM"]] = 0.20
+    fixed_val = classwise_fusion(base_val["probs"], primary_val["probs"], fixed_class_alphas)
+    fixed_test = classwise_fusion(base_test["probs"], primary_test["probs"], fixed_class_alphas)
+    fixed_reference = candidate_record(
+        name="fixed_classwise_nonrem0.90_rem0.20",
+        kind="fixed_reference",
+        params={
+            "class_alphas": {
+                name: float(fixed_class_alphas[idx]) for idx, name in enumerate(STAGE5_NAMES)
+            }
+        },
+        val_metrics=evaluate_probs(base_val["y_true"], fixed_val),
+        test_metrics=evaluate_probs(base_test["y_true"], fixed_test),
+        selection_metric=selection_metric,
+    )
+    records.append(fixed_reference)
 
     for non_rem_primary in non_rem_primary_alphas:
         for non_rem_secondary in non_rem_secondary_alphas:
@@ -143,7 +169,16 @@ def evaluate_three_model_fusion(
                         )
                     )
 
-    best = max(records, key=lambda item: item["selection_score"])
+    best, selection_details = select_best_record(
+        records=records,
+        selection_policy=selection_policy,
+        fixed_reference=fixed_reference,
+        min_score_delta=fixed_min_score_delta,
+        rem_tolerance=fixed_rem_tolerance,
+        light_tolerance=fixed_light_tolerance,
+        wake_tolerance=fixed_wake_tolerance,
+        deep_tolerance=fixed_deep_tolerance,
+    )
     report = {
         "base_predictions": str(base_predictions),
         "primary_predictions": str(primary_predictions),
@@ -152,6 +187,9 @@ def evaluate_three_model_fusion(
         "primary_model_role": "full_w20",
         "secondary_model_role": "extra_model",
         "selection_metric": selection_metric,
+        "selection_policy": selection_policy,
+        "selection_details": selection_details,
+        "fixed_reference": fixed_reference,
         "stage5_names": list(STAGE5_NAMES),
         "record_count": len(records),
         "best_by_validation": best,
@@ -173,6 +211,13 @@ def print_top(report: dict[str, Any], limit: int) -> None:
             f"{summary['4_macro_f1']:.4f} | {summary['4_kappa']:.4f} | "
             f"{summary['wake_f1']:.4f} | {summary['light_f1']:.4f} | "
             f"{summary['deep_f1']:.4f} | {summary['rem_f1']:.4f} |"
+        )
+    if report.get("selection_policy") != "standard":
+        best = report["best_by_validation"]
+        details = report.get("selection_details", {})
+        print(
+            f"\nselected_by_{report['selection_policy']}: {best['name']} "
+            f"(eligible={details.get('eligible_count')}, fallback_to_fixed={details.get('fallback_to_fixed')})"
         )
 
 
@@ -198,6 +243,17 @@ def main() -> None:
         ),
         default="4_macro_f1_plus_4_kappa",
     )
+    parser.add_argument(
+        "--selection-policy",
+        choices=("standard", "fixed_aware_constrained"),
+        default="standard",
+        help="standard=max validation score. fixed_aware_constrained filters candidates against fixed class-wise fusion on validation.",
+    )
+    parser.add_argument("--fixed-min-score-delta", type=float, default=0.0)
+    parser.add_argument("--fixed-rem-tolerance", type=float, default=0.005)
+    parser.add_argument("--fixed-light-tolerance", type=float, default=0.005)
+    parser.add_argument("--fixed-wake-tolerance", type=float, default=0.010)
+    parser.add_argument("--fixed-deep-tolerance", type=float, default=0.020)
     parser.add_argument("--top", type=int, default=12)
     args = parser.parse_args()
 
@@ -211,6 +267,12 @@ def main() -> None:
         rem_primary_alphas=parse_float_list(args.rem_primary_alphas, default=[]),
         rem_secondary_alphas=parse_float_list(args.rem_secondary_alphas, default=[]),
         selection_metric=args.selection_metric,
+        selection_policy=args.selection_policy,
+        fixed_min_score_delta=args.fixed_min_score_delta,
+        fixed_rem_tolerance=args.fixed_rem_tolerance,
+        fixed_light_tolerance=args.fixed_light_tolerance,
+        fixed_wake_tolerance=args.fixed_wake_tolerance,
+        fixed_deep_tolerance=args.fixed_deep_tolerance,
     )
     print_top(report, limit=args.top)
 

@@ -17,6 +17,17 @@ RUN_TWO_MODEL="${RUN_TWO_MODEL:-1}"
 RUN_THREE_MODEL="${RUN_THREE_MODEL:-1}"
 THIRD_VARIANT="${THIRD_VARIANT:-remaux_w05}"
 THIRD_MODEL_PREFIX="${THIRD_MODEL_PREFIX:-}"
+FUSION_SELECTION_POLICY="${FUSION_SELECTION_POLICY:-standard}"
+FIXED_MIN_SCORE_DELTA="${FIXED_MIN_SCORE_DELTA:-0.0}"
+FIXED_REM_TOLERANCE="${FIXED_REM_TOLERANCE:-0.005}"
+FIXED_LIGHT_TOLERANCE="${FIXED_LIGHT_TOLERANCE:-0.005}"
+FIXED_WAKE_TOLERANCE="${FIXED_WAKE_TOLERANCE:-0.010}"
+FIXED_DEEP_TOLERANCE="${FIXED_DEEP_TOLERANCE:-0.020}"
+
+report_suffix=""
+if [[ "${FUSION_SELECTION_POLICY}" != "standard" ]]; then
+  report_suffix="_${FUSION_SELECTION_POLICY}"
+fi
 
 prediction_path_for_seed() {
   local model_prefix="$1"
@@ -105,11 +116,11 @@ for seed in "${SEEDS[@]}"; do
   ensure_prediction_probs "${w20_predictions}" "${w20_npz}" "${w20_model_dir}"
 
   if [[ "${seed}" == "42" ]]; then
-    two_out_json="${OUTPUT_ROOT}/fusion_dense_original_temporal_full_w20_context${CONTEXT_EPOCHS}_h${HIDDEN_SIZE}.json"
-    three_out_json="${OUTPUT_ROOT}/fusion3_original_full_w20_${THIRD_VARIANT}_context${CONTEXT_EPOCHS}_h${HIDDEN_SIZE}.json"
+    two_out_json="${OUTPUT_ROOT}/fusion_dense_original_temporal_full_w20_context${CONTEXT_EPOCHS}_h${HIDDEN_SIZE}${report_suffix}.json"
+    three_out_json="${OUTPUT_ROOT}/fusion3_original_full_w20_${THIRD_VARIANT}_context${CONTEXT_EPOCHS}_h${HIDDEN_SIZE}${report_suffix}.json"
   else
-    two_out_json="${OUTPUT_ROOT}/fusion_dense_original_temporal_full_w20_context${CONTEXT_EPOCHS}_h${HIDDEN_SIZE}_seed${seed}.json"
-    three_out_json="${OUTPUT_ROOT}/fusion3_original_full_w20_${THIRD_VARIANT}_context${CONTEXT_EPOCHS}_h${HIDDEN_SIZE}_seed${seed}.json"
+    two_out_json="${OUTPUT_ROOT}/fusion_dense_original_temporal_full_w20_context${CONTEXT_EPOCHS}_h${HIDDEN_SIZE}${report_suffix}_seed${seed}.json"
+    three_out_json="${OUTPUT_ROOT}/fusion3_original_full_w20_${THIRD_VARIANT}_context${CONTEXT_EPOCHS}_h${HIDDEN_SIZE}${report_suffix}_seed${seed}.json"
   fi
 
   if [[ "${RUN_TWO_MODEL}" == "1" ]]; then
@@ -121,6 +132,12 @@ for seed in "${SEEDS[@]}"; do
       --classwise-non-rem-alphas "0.75,0.80,0.85,0.90,0.92,0.95,0.98,1.00" \
       --classwise-rem-alphas "0,0.05,0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50" \
       --selection-metric 4_macro_f1_plus_4_kappa \
+      --selection-policy "${FUSION_SELECTION_POLICY}" \
+      --fixed-min-score-delta "${FIXED_MIN_SCORE_DELTA}" \
+      --fixed-rem-tolerance "${FIXED_REM_TOLERANCE}" \
+      --fixed-light-tolerance "${FIXED_LIGHT_TOLERANCE}" \
+      --fixed-wake-tolerance "${FIXED_WAKE_TOLERANCE}" \
+      --fixed-deep-tolerance "${FIXED_DEEP_TOLERANCE}" \
       --top 20
     two_model_reports+=("${two_out_json}")
   fi
@@ -138,6 +155,12 @@ for seed in "${SEEDS[@]}"; do
       --secondary-predictions "${third_predictions}" \
       --out-json "${three_out_json}" \
       --selection-metric 4_macro_f1_plus_4_kappa \
+      --selection-policy "${FUSION_SELECTION_POLICY}" \
+      --fixed-min-score-delta "${FIXED_MIN_SCORE_DELTA}" \
+      --fixed-rem-tolerance "${FIXED_REM_TOLERANCE}" \
+      --fixed-light-tolerance "${FIXED_LIGHT_TOLERANCE}" \
+      --fixed-wake-tolerance "${FIXED_WAKE_TOLERANCE}" \
+      --fixed-deep-tolerance "${FIXED_DEEP_TOLERANCE}" \
       --top 20
     three_model_reports+=("${three_out_json}")
   fi
@@ -146,13 +169,13 @@ done
 if [[ "${#two_model_reports[@]}" -gt 1 ]]; then
   PYTHONPATH=src "${PYTHON_BIN}" -m sse_sleep.summarize_prediction_fusion \
     --reports "${two_model_reports[@]}" \
-    --out-json "${OUTPUT_ROOT}/fusion_dense_original_temporal_full_w20_context${CONTEXT_EPOCHS}_h${HIDDEN_SIZE}_summary.json"
+    --out-json "${OUTPUT_ROOT}/fusion_dense_original_temporal_full_w20_context${CONTEXT_EPOCHS}_h${HIDDEN_SIZE}${report_suffix}_summary.json"
 fi
 
 if [[ "${#three_model_reports[@]}" -gt 1 ]]; then
   PYTHONPATH=src "${PYTHON_BIN}" -m sse_sleep.summarize_prediction_fusion \
     --reports "${three_model_reports[@]}" \
-    --out-json "${OUTPUT_ROOT}/fusion3_original_full_w20_${THIRD_VARIANT}_context${CONTEXT_EPOCHS}_h${HIDDEN_SIZE}_summary.json"
+    --out-json "${OUTPUT_ROOT}/fusion3_original_full_w20_${THIRD_VARIANT}_context${CONTEXT_EPOCHS}_h${HIDDEN_SIZE}${report_suffix}_summary.json"
 fi
 
 echo "=== Performance fusion search complete ==="

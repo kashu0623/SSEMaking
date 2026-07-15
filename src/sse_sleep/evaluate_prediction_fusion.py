@@ -132,6 +132,81 @@ def candidate_record(
     }
 
 
+def fixed_aware_passes(
+    record: dict[str, Any],
+    fixed_reference: dict[str, Any],
+    min_score_delta: float,
+    rem_tolerance: float,
+    light_tolerance: float,
+    wake_tolerance: float,
+    deep_tolerance: float,
+) -> bool:
+    summary = record["val"]["summary"]
+    fixed_summary = fixed_reference["val"]["summary"]
+    return (
+        record["selection_score"] >= fixed_reference["selection_score"] + min_score_delta
+        and summary["rem_f1"] >= fixed_summary["rem_f1"] - rem_tolerance
+        and summary["light_f1"] >= fixed_summary["light_f1"] - light_tolerance
+        and summary["wake_f1"] >= fixed_summary["wake_f1"] - wake_tolerance
+        and summary["deep_f1"] >= fixed_summary["deep_f1"] - deep_tolerance
+    )
+
+
+def select_best_record(
+    records: Sequence[dict[str, Any]],
+    selection_policy: str,
+    fixed_reference: dict[str, Any] | None,
+    min_score_delta: float,
+    rem_tolerance: float,
+    light_tolerance: float,
+    wake_tolerance: float,
+    deep_tolerance: float,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if selection_policy == "standard":
+        best = max(records, key=lambda item: item["selection_score"])
+        return best, {
+            "policy": selection_policy,
+            "eligible_count": len(records),
+            "fallback_to_fixed": False,
+        }
+
+    if fixed_reference is None:
+        best = max(records, key=lambda item: item["selection_score"])
+        return best, {
+            "policy": selection_policy,
+            "eligible_count": len(records),
+            "fallback_to_fixed": False,
+            "warning": "fixed_reference_missing; fell back to standard selection",
+        }
+
+    eligible = [
+        record
+        for record in records
+        if record["name"] != fixed_reference["name"]
+        if fixed_aware_passes(
+            record=record,
+            fixed_reference=fixed_reference,
+            min_score_delta=min_score_delta,
+            rem_tolerance=rem_tolerance,
+            light_tolerance=light_tolerance,
+            wake_tolerance=wake_tolerance,
+            deep_tolerance=deep_tolerance,
+        )
+    ]
+    if not eligible:
+        return fixed_reference, {
+            "policy": selection_policy,
+            "eligible_count": 0,
+            "fallback_to_fixed": True,
+        }
+    best = max(eligible, key=lambda item: item["selection_score"])
+    return best, {
+        "policy": selection_policy,
+        "eligible_count": len(eligible),
+        "fallback_to_fixed": best["name"] == fixed_reference["name"],
+    }
+
+
 def evaluate_prediction_fusion(
     base_predictions: Path,
     candidate_predictions: Path,
@@ -140,6 +215,12 @@ def evaluate_prediction_fusion(
     classwise_non_rem_alphas: Sequence[float],
     classwise_rem_alphas: Sequence[float],
     selection_metric: str,
+    selection_policy: str,
+    fixed_min_score_delta: float,
+    fixed_rem_tolerance: float,
+    fixed_light_tolerance: float,
+    fixed_wake_tolerance: float,
+    fixed_deep_tolerance: float,
 ) -> dict[str, Any]:
     base_val = load_split(base_predictions, "val")
     base_test = load_split(base_predictions, "test")
@@ -193,13 +274,26 @@ def evaluate_prediction_fusion(
                 )
             )
 
-    best = max(records, key=lambda item: item["selection_score"])
+    fixed_reference = next((record for record in records if record["name"] == "classwise_nonrem0.90_rem0.20"), None)
+    best, selection_details = select_best_record(
+        records=records,
+        selection_policy=selection_policy,
+        fixed_reference=fixed_reference,
+        min_score_delta=fixed_min_score_delta,
+        rem_tolerance=fixed_rem_tolerance,
+        light_tolerance=fixed_light_tolerance,
+        wake_tolerance=fixed_wake_tolerance,
+        deep_tolerance=fixed_deep_tolerance,
+    )
     report = {
         "base_predictions": str(base_predictions),
         "candidate_predictions": str(candidate_predictions),
         "base_model_role": "alpha_0_original_temporal",
         "candidate_model_role": "alpha_1_full_w20",
         "selection_metric": selection_metric,
+        "selection_policy": selection_policy,
+        "selection_details": selection_details,
+        "fixed_reference": fixed_reference,
         "stage5_names": list(STAGE5_NAMES),
         "record_count": len(records),
         "best_by_validation": best,
@@ -221,6 +315,13 @@ def print_top(report: dict[str, Any], limit: int) -> None:
             f"{summary['4_macro_f1']:.4f} | {summary['4_kappa']:.4f} | "
             f"{summary['wake_f1']:.4f} | {summary['light_f1']:.4f} | "
             f"{summary['deep_f1']:.4f} | {summary['rem_f1']:.4f} |"
+        )
+    if report.get("selection_policy") != "standard":
+        best = report["best_by_validation"]
+        details = report.get("selection_details", {})
+        print(
+            f"\nselected_by_{report['selection_policy']}: {best['name']} "
+            f"(eligible={details.get('eligible_count')}, fallback_to_fixed={details.get('fallback_to_fixed')})"
         )
 
 
@@ -244,6 +345,17 @@ def main() -> None:
         ),
         default="4_macro_f1_plus_4_kappa",
     )
+    parser.add_argument(
+        "--selection-policy",
+        choices=("standard", "fixed_aware_constrained"),
+        default="standard",
+        help="standard=max validation score. fixed_aware_constrained filters candidates against fixed class-wise fusion on validation.",
+    )
+    parser.add_argument("--fixed-min-score-delta", type=float, default=0.0)
+    parser.add_argument("--fixed-rem-tolerance", type=float, default=0.005)
+    parser.add_argument("--fixed-light-tolerance", type=float, default=0.005)
+    parser.add_argument("--fixed-wake-tolerance", type=float, default=0.010)
+    parser.add_argument("--fixed-deep-tolerance", type=float, default=0.020)
     parser.add_argument("--top", type=int, default=12)
     args = parser.parse_args()
 
@@ -255,6 +367,12 @@ def main() -> None:
         classwise_non_rem_alphas=parse_float_list(args.classwise_non_rem_alphas, default=[]),
         classwise_rem_alphas=parse_float_list(args.classwise_rem_alphas, default=[]),
         selection_metric=args.selection_metric,
+        selection_policy=args.selection_policy,
+        fixed_min_score_delta=args.fixed_min_score_delta,
+        fixed_rem_tolerance=args.fixed_rem_tolerance,
+        fixed_light_tolerance=args.fixed_light_tolerance,
+        fixed_wake_tolerance=args.fixed_wake_tolerance,
+        fixed_deep_tolerance=args.fixed_deep_tolerance,
     )
     print_top(report, limit=args.top)
 
