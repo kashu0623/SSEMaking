@@ -228,14 +228,10 @@ capacity_h128 classwise3_nonrem_p0.78_s0.10_rem_p0.00_s0.25
 %cd /content/SSE
 !git pull
 
-!THIRD_PREFIX_CANDIDATES="capacity_h128=lstm_temporal_w20_context20_inverse_capacity_h128 h128_ls003=lstm_temporal_w20_context20_inverse_h128_ls003 h128_ls005=lstm_temporal_w20_context20_inverse_h128_ls005 h128_rem12=lstm_temporal_w20_context20_inverse_h128_rem12" \
-THREE_NON_REM_PRIMARY_ALPHAS="0.74,0.75,0.76,0.77,0.78,0.79" \
-THREE_NON_REM_SECONDARY_ALPHAS="0.08,0.10,0.12,0.14,0.15" \
-THREE_REM_PRIMARY_ALPHAS="0" \
-THREE_REM_SECONDARY_ALPHAS="0.23,0.25,0.27,0.30" \
-FUSION_REPORT_SUFFIX="_ultra_refine" \
-bash scripts/run_performance_best_refinement_colab.sh
+!bash scripts/run_ultra_refine_colab.sh
 ```
+
+완료 후 전역 랭킹은 `/content/drive/MyDrive/SSE_outputs/fusion3_original_full_w20_global_ultra_refine_rank.json`에 저장된다.
 
 판정:
 

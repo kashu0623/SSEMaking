@@ -29,6 +29,18 @@ THREE_NON_REM_SECONDARY_ALPHAS="${THREE_NON_REM_SECONDARY_ALPHAS:-0,0.05,0.10,0.
 THREE_REM_PRIMARY_ALPHAS="${THREE_REM_PRIMARY_ALPHAS:-0,0.10,0.20,0.30,0.40}"
 THREE_REM_SECONDARY_ALPHAS="${THREE_REM_SECONDARY_ALPHAS:-0,0.05,0.10,0.15,0.20}"
 
+report_suffix=""
+if [[ "${FUSION_SELECTION_POLICY}" != "standard" ]]; then
+  report_suffix="_${FUSION_SELECTION_POLICY}"
+fi
+report_suffix="${report_suffix}${FUSION_REPORT_SUFFIX}"
+
+seed_count=0
+for _seed in ${SEEDS}; do
+  seed_count=$((seed_count + 1))
+done
+three_model_summary_reports=()
+
 # Third variants follow the default full-w20 run naming:
 #   lstm_temporal_w20_context20_h64_inverse_${THIRD_VARIANT}
 THIRD_VARIANTS=(${THIRD_VARIANTS:-remaux_w05 remaux_w05_sel4combo})
@@ -85,6 +97,9 @@ if [[ "${RUN_THIRD_VARIANTS}" == "1" ]]; then
     THREE_REM_PRIMARY_ALPHAS="${THREE_REM_PRIMARY_ALPHAS}" \
     THREE_REM_SECONDARY_ALPHAS="${THREE_REM_SECONDARY_ALPHAS}" \
     bash scripts/run_performance_fusion_colab.sh
+    if [[ "${seed_count}" -gt 1 ]]; then
+      three_model_summary_reports+=("${OUTPUT_ROOT}/fusion3_original_full_w20_${variant}_context${CONTEXT_EPOCHS}_h${HIDDEN_SIZE}${report_suffix}_summary.json")
+    fi
   done
 fi
 
@@ -121,6 +136,25 @@ for item in "${THIRD_PREFIX_CANDIDATES[@]}"; do
   THREE_REM_PRIMARY_ALPHAS="${THREE_REM_PRIMARY_ALPHAS}" \
   THREE_REM_SECONDARY_ALPHAS="${THREE_REM_SECONDARY_ALPHAS}" \
   bash scripts/run_performance_fusion_colab.sh
+  if [[ "${seed_count}" -gt 1 ]]; then
+    three_model_summary_reports+=("${OUTPUT_ROOT}/fusion3_original_full_w20_${label}_context${CONTEXT_EPOCHS}_h${HIDDEN_SIZE}${report_suffix}_summary.json")
+  fi
 done
+
+if [[ "${#three_model_summary_reports[@]}" -gt 1 ]]; then
+  existing_summary_reports=()
+  for summary_report in "${three_model_summary_reports[@]}"; do
+    if [[ -f "${summary_report}" ]]; then
+      existing_summary_reports+=("${summary_report}")
+    else
+      echo "Skipping missing fusion summary in global rank: ${summary_report}" >&2
+    fi
+  done
+  if [[ "${#existing_summary_reports[@]}" -gt 1 ]]; then
+    PYTHONPATH=src "${PYTHON_BIN}" -m sse_sleep.rank_fusion_summaries \
+      --summaries "${existing_summary_reports[@]}" \
+      --out-json "${OUTPUT_ROOT}/fusion3_original_full_w20_global${report_suffix}_rank.json"
+  fi
+fi
 
 echo "=== Aggressive fusion sweep complete ==="

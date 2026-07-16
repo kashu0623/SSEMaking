@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Fine-grid refinement around the current performance-best 3-model fixed fusion:
-#   classwise3_nonrem_p0.80_s0.15_rem_p0.00_s0.20
+# Fine-grid refinement around the current performance-best 3-model fixed fusion.
 #
 # This script does not train models. It reuses existing prediction exports or
 # checkpoints, evaluates a narrow high-performance grid across seeds, and writes
@@ -13,6 +12,7 @@ CONTEXT_EPOCHS="${CONTEXT_EPOCHS:-20}"
 HIDDEN_SIZE="${HIDDEN_SIZE:-64}"
 SEEDS="${SEEDS:-42 7 123}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
+FUSION_REPORT_SUFFIX="${FUSION_REPORT_SUFFIX:-_best_refine}"
 
 # Include the current best h128/capacity candidate plus nearby diversity models
 # that may add useful Deep/REM error-pattern differences.
@@ -25,7 +25,7 @@ CONTEXT_EPOCHS="${CONTEXT_EPOCHS}" \
 HIDDEN_SIZE="${HIDDEN_SIZE}" \
 RUN_THIRD_VARIANTS=0 \
 THIRD_PREFIX_CANDIDATES="${THIRD_PREFIX_CANDIDATES}" \
-FUSION_REPORT_SUFFIX="_best_refine" \
+FUSION_REPORT_SUFFIX="${FUSION_REPORT_SUFFIX}" \
 THREE_NON_REM_PRIMARY_ALPHAS="${THREE_NON_REM_PRIMARY_ALPHAS:-0.75,0.78,0.80,0.82,0.85,0.88,0.90}" \
 THREE_NON_REM_SECONDARY_ALPHAS="${THREE_NON_REM_SECONDARY_ALPHAS:-0.10,0.12,0.15,0.18,0.20}" \
 THREE_REM_PRIMARY_ALPHAS="${THREE_REM_PRIMARY_ALPHAS:-0}" \
