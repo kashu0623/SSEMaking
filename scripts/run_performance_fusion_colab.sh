@@ -23,11 +23,19 @@ FIXED_REM_TOLERANCE="${FIXED_REM_TOLERANCE:-0.005}"
 FIXED_LIGHT_TOLERANCE="${FIXED_LIGHT_TOLERANCE:-0.005}"
 FIXED_WAKE_TOLERANCE="${FIXED_WAKE_TOLERANCE:-0.010}"
 FIXED_DEEP_TOLERANCE="${FIXED_DEEP_TOLERANCE:-0.020}"
+FUSION_REPORT_SUFFIX="${FUSION_REPORT_SUFFIX:-}"
+TWO_CLASSWISE_NON_REM_ALPHAS="${TWO_CLASSWISE_NON_REM_ALPHAS:-0.75,0.80,0.85,0.90,0.92,0.95,0.98,1.00}"
+TWO_CLASSWISE_REM_ALPHAS="${TWO_CLASSWISE_REM_ALPHAS:-0,0.05,0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50}"
+THREE_NON_REM_PRIMARY_ALPHAS="${THREE_NON_REM_PRIMARY_ALPHAS:-0.75,0.80,0.85,0.90,0.95,1.00}"
+THREE_NON_REM_SECONDARY_ALPHAS="${THREE_NON_REM_SECONDARY_ALPHAS:-0,0.05,0.10,0.15,0.20}"
+THREE_REM_PRIMARY_ALPHAS="${THREE_REM_PRIMARY_ALPHAS:-0,0.10,0.20,0.30,0.40}"
+THREE_REM_SECONDARY_ALPHAS="${THREE_REM_SECONDARY_ALPHAS:-0,0.05,0.10,0.15,0.20}"
 
 report_suffix=""
 if [[ "${FUSION_SELECTION_POLICY}" != "standard" ]]; then
   report_suffix="_${FUSION_SELECTION_POLICY}"
 fi
+report_suffix="${report_suffix}${FUSION_REPORT_SUFFIX}"
 
 prediction_path_for_seed() {
   local model_prefix="$1"
@@ -129,8 +137,8 @@ for seed in "${SEEDS[@]}"; do
       --base-predictions "${original_predictions}" \
       --candidate-predictions "${w20_predictions}" \
       --out-json "${two_out_json}" \
-      --classwise-non-rem-alphas "0.75,0.80,0.85,0.90,0.92,0.95,0.98,1.00" \
-      --classwise-rem-alphas "0,0.05,0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50" \
+      --classwise-non-rem-alphas "${TWO_CLASSWISE_NON_REM_ALPHAS}" \
+      --classwise-rem-alphas "${TWO_CLASSWISE_REM_ALPHAS}" \
       --selection-metric 4_macro_f1_plus_4_kappa \
       --selection-policy "${FUSION_SELECTION_POLICY}" \
       --fixed-min-score-delta "${FIXED_MIN_SCORE_DELTA}" \
@@ -154,6 +162,10 @@ for seed in "${SEEDS[@]}"; do
       --primary-predictions "${w20_predictions}" \
       --secondary-predictions "${third_predictions}" \
       --out-json "${three_out_json}" \
+      --non-rem-primary-alphas "${THREE_NON_REM_PRIMARY_ALPHAS}" \
+      --non-rem-secondary-alphas "${THREE_NON_REM_SECONDARY_ALPHAS}" \
+      --rem-primary-alphas "${THREE_REM_PRIMARY_ALPHAS}" \
+      --rem-secondary-alphas "${THREE_REM_SECONDARY_ALPHAS}" \
       --selection-metric 4_macro_f1_plus_4_kappa \
       --selection-policy "${FUSION_SELECTION_POLICY}" \
       --fixed-min-score-delta "${FIXED_MIN_SCORE_DELTA}" \
