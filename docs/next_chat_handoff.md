@@ -24,7 +24,7 @@ production-safe previous best:
 
 current performance-only best:
 3-model fixed fusion
-classwise3_nonrem_p0.78_s0.10_rem_p0.00_s0.25
+classwise3_nonrem_p0.78_s0.12_rem_p0.00_s0.30
 ```
 
 current performance-only best 구성:
@@ -36,14 +36,14 @@ models:
 3. capacity_h128 = lstm_temporal_w20_context20_inverse_capacity_h128
 
 Wake/Light/Deep:
-  0.12 * original temporal
+  0.10 * original temporal
   0.78 * full_w20
-  0.10 * capacity_h128
+  0.12 * capacity_h128
 
 REM:
-  0.75 * original temporal
+  0.70 * original temporal
   0.00 * full_w20
-  0.25 * capacity_h128
+  0.30 * capacity_h128
 ```
 
 3-seed 평균 비교:
@@ -52,28 +52,29 @@ REM:
 variant                                      4 Macro  4 Kappa  Wake    Light   Deep    REM
 previous fixed 2-model nonrem0.90_rem0.20    0.4074   0.2458   0.5034  0.6321  0.1220  0.3722
 prev 3-model best p0.80_s0.15_rem0.00_s0.20  0.4101   0.2486   0.5036  0.6344  0.1256  0.3766
-current best p0.78_s0.10_rem0.00_s0.25       0.4102   0.2515   0.5077  0.6345  0.1208  0.3780
+prev current p0.78_s0.10_rem0.00_s0.25       0.4102   0.2515   0.5077  0.6345  0.1208  0.3780
+current best p0.78_s0.12_rem0.00_s0.30       0.4109   0.2517   0.5069  0.6360  0.1219  0.3787
 ```
 
 current best vs previous fixed 2-model:
 
 ```text
-4 Macro +0.0028 (+0.69%)
-4 Kappa +0.0057 (+2.32%)
-Wake    +0.0043 (+0.85%)
-Light   +0.0024 (+0.38%)  # fixed Light was recovered from latest dense/fixed summaries
-Deep    -0.0012 (-0.98%)
-REM     +0.0058 (+1.56%)
+4 Macro +0.0035 (+0.85%)
+4 Kappa +0.0059 (+2.40%)
+Wake    +0.0035 (+0.69%)
+Light   +0.0039 (+0.62%)
+Deep    -0.0000 (-0.03%)
+REM     +0.0065 (+1.76%)
 ```
 
 해석:
 
 ```text
-성능-only 기준으로 current best는 classwise3_nonrem_p0.78_s0.10_rem_p0.00_s0.25다.
-이전 3-model best 대비 4 Macro는 사실상 동일하고, 4 Kappa/Wake/REM이 좋아진다.
-대신 Deep은 이전 3-model best보다 낮고, fixed 2-model보다도 소폭 낮다.
-Deep 보존을 우선하면 이전 3-model best p0.80_s0.15/rem_s0.20도 후보지만,
-overall 4M+4K 및 Wake/REM 기준 current best가 1등이다.
+ultra_refine 결과 성능-only 기준 current best는 capacity_h128 classwise3_nonrem_p0.78_s0.12_rem_p0.00_s0.30이다.
+순수 4M+4K 최고는 h128_ls003 classwise3_nonrem_p0.74_s0.15_rem_p0.00_s0.30
+(4M 0.4107 / 4K 0.2525)이지만, current best와 4M+4K 차이가 0.0005 이내이고
+Wake+REM은 capacity_h128 p0.78_s0.12/rem_s0.30이 더 높다.
+따라서 handoff 판정 규칙에 따라 capacity_h128 p0.78_s0.12/rem_s0.30을 새 best로 둔다.
 ```
 
 ### 2026-07-16 진행된 실험 요약
@@ -192,14 +193,19 @@ h128_ls003는 capacity_h128 current best보다 4K +0.0002, Light/Deep은 조금 
 차이가 너무 작아 실질 동률이다.
 성능-only 4M+4K만 보면 h128_ls003가 미세하게 높지만,
 Wake/REM까지 보면 capacity_h128 p0.78_s0.10/rem_s0.25가 더 균형적이다.
-현재 handoff 기준 best는 capacity_h128 p0.78_s0.10/rem_s0.25로 둔다.
+이 시점 handoff 기준 best는 capacity_h128 p0.78_s0.10/rem_s0.25였다.
 ```
 
-### 다음 채팅방에서 바로 이어갈 실험
+#### 5. ultra_refine 결과
 
-현재 top 영역이 매우 평평하다. 새 모델 학습보다 top fixed-weight 근방을 아주 좁게 더 파는 것이 우선이다.
+실행/구현:
 
-추천 fine grid:
+```text
+scripts/run_ultra_refine_colab.sh
+src/sse_sleep/rank_fusion_summaries.py
+```
+
+ultra_refine grid:
 
 ```text
 third candidates:
@@ -214,32 +220,31 @@ rem_primary:       0
 rem_secondary:     0.23,0.25,0.27,0.30
 ```
 
-기준점:
+3-seed 평균 결과 top:
 
 ```text
-current best to beat:
-capacity_h128 classwise3_nonrem_p0.78_s0.10_rem_p0.00_s0.25
-4M 0.4102 / 4K 0.2515 / Wake 0.5077 / Light 0.6345 / Deep 0.1208 / REM 0.3780
+rank/policy                 variant                                      4 Macro  4 Kappa  Wake    Light   Deep    REM
+pure 4M+4K #1               h128_ls003 p0.74_s0.15_rem0.00_s0.30        0.4107   0.2525   0.5053  0.6387  0.1232  0.3755
+tie-band selected current   capacity_h128 p0.78_s0.12_rem0.00_s0.30     0.4109   0.2517   0.5069  0.6360  0.1219  0.3787
+previous current            capacity_h128 p0.78_s0.10_rem0.00_s0.25     0.4102   0.2515   0.5077  0.6345  0.1208  0.3780
+fixed 2-model reference     classwise_nonrem0.90_rem0.20                0.4074   0.2458   0.5034  0.6321  0.1220  0.3722
 ```
-
-다음 실행 예:
-
-```bash
-%cd /content/SSE
-!git pull
-
-!bash scripts/run_ultra_refine_colab.sh
-```
-
-완료 후 전역 랭킹은 `/content/drive/MyDrive/SSE_outputs/fusion3_original_full_w20_global_ultra_refine_rank.json`에 저장된다.
 
 판정:
 
 ```text
-성능-only 기준으로 4M+4K가 가장 높은 fixed-weight 후보를 새 best로 둔다.
-단, 4M+4K 차이가 0.0005 이하이면 Wake/REM이 높은 쪽을 우선한다.
-Deep을 따로 중시하는 결정이 생기면 h128_ls003 계열도 다시 후보로 볼 수 있다.
+순수 4M+4K만 보면 h128_ls003 p0.74_s0.15/rem_s0.30이 최고다.
+하지만 기존 판정 규칙상 4M+4K 차이가 0.0005 이하이면 Wake/REM이 높은 쪽을 우선한다.
+capacity_h128 p0.78_s0.12/rem_s0.30은 pure top보다 4M+4K가 0.0005 낮지만,
+Wake +0.0015 / REM +0.0033이므로 새 current performance-only best로 둔다.
+Deep/Light를 더 중시하는 의사결정이 생기면 h128_ls003 p0.74_s0.15/rem_s0.30도 동률권 후보로 남긴다.
 ```
+
+### 다음 채팅방에서 바로 이어갈 실험
+
+현재 top 영역은 ultra_refine 후에도 매우 평평하다. 새 모델 학습보다 먼저 위 두 fixed-weight 후보의
+seed별 분산과 class confusion을 비교해, Wake/REM 우선 정책을 유지할지 Deep/Light 보존 쪽으로
+판정 기준을 바꿀지 결정하는 것이 좋다.
 
 아래 2026-07-15 및 더 오래된 섹션은 과거 진행 로그다. 최신 기준은 위 2026-07-16 섹션이다.
 
