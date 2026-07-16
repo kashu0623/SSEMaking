@@ -21,6 +21,9 @@ def infer_source_label(path: Path) -> str:
     match = re.match(r"fusion3_original_full_w20_(.+?)_context\d+_h\d+", stem)
     if match:
         return match.group(1)
+    match = re.match(r"fusion4_original_full_w20_(.+?)_context\d+_h\d+", stem)
+    if match:
+        return match.group(1)
     return stem
 
 
@@ -112,7 +115,7 @@ def main() -> None:
     parser.add_argument(
         "--kinds",
         nargs="*",
-        default=("classwise3_nonrem_rem",),
+        default=("classwise3_nonrem_rem", "classwise4_grouped"),
         help="Record kinds to include. Pass no values after --kinds to include all kinds.",
     )
     parser.add_argument(

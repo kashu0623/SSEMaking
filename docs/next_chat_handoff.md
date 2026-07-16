@@ -246,6 +246,59 @@ Deep/Light를 더 중시하는 의사결정이 생기면 h128_ls003 p0.74_s0.15/
 seed별 분산과 class confusion을 비교해, Wake/REM 우선 정책을 유지할지 Deep/Light 보존 쪽으로
 판정 기준을 바꿀지 결정하는 것이 좋다.
 
+#### 1순위: 4-model grouped flexible fusion
+
+다음 성능 향상 후보는 3-model fusion의 non-REM 공통 weight 제약을 풀고,
+Wake / Light+Deep / REM 그룹별로 capacity_h128와 h128_ls003를 다르게 섞는 것이다.
+
+구현:
+
+```text
+src/sse_sleep/evaluate_four_model_fusion.py
+scripts/run_four_model_flexible_fusion_colab.sh
+```
+
+실행:
+
+```bash
+%cd /content/SSE
+!git pull
+!bash scripts/run_four_model_flexible_fusion_colab.sh
+```
+
+기본 grid:
+
+```text
+models:
+1. original temporal
+2. full_w20
+3. capacity_h128
+4. h128_ls003
+
+Wake:
+  full_w20       0.78,0.79
+  capacity_h128 0.10,0.12,0.14
+  h128_ls003    0,0.03
+
+Light/Deep:
+  full_w20       0.72,0.74,0.76
+  capacity_h128 0,0.03
+  h128_ls003    0.12,0.15,0.18
+
+REM:
+  full_w20       0
+  capacity_h128 0.25,0.30,0.32
+  h128_ls003    0,0.03
+```
+
+판정:
+
+```text
+기존 current best capacity_h128 p0.78_s0.12/rem_s0.30을 reference로 함께 기록한다.
+4M+4K가 current best보다 높고, 0.0005 이내 동률이면 Wake+REM이 높은 후보를 우선한다.
+Light/Deep이 크게 좋아졌지만 Wake/REM이 내려간 경우는 별도 후보로 보존한다.
+```
+
 아래 2026-07-15 및 더 오래된 섹션은 과거 진행 로그다. 최신 기준은 위 2026-07-16 섹션이다.
 
 ### 2026-07-15 방향 전환: 성능 우선 fusion 허용
