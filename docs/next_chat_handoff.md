@@ -366,7 +366,39 @@ flex4_refine에서도 상승했지만 top은 다시 평평하다. 다음은 두 
 ```
 
 현재는 4M+4K/Deep 상승 여지가 아직 pure top 쪽에 있으므로,
-다음 추천은 4-model에서 Light/Deep 그룹만 더 촘촘히 파는 `flex4_deep_refine`이다.
+다음 추천은 4-model에서 Light(N1/N2)와 Deep(N3)을 분리하는 `flex4_stage_refine`이다.
+
+실행:
+
+```bash
+%cd /content/SSE
+!git pull
+!bash scripts/run_four_model_flex4_stage_refinement_colab.sh
+```
+
+기본 grid:
+
+```text
+Wake:
+  full_w20       0.77,0.78
+  capacity_h128 0.08,0.10
+  h128_ls003    0
+
+Light (N1/N2):
+  full_w20       0.75,0.76,0.77
+  capacity_h128 0,0.02
+  h128_ls003    0.15,0.17
+
+Deep (N3):
+  full_w20       0.74,0.76
+  capacity_h128 0,0.02
+  h128_ls003    0.18,0.20
+
+REM:
+  full_w20       0
+  capacity_h128 0.34,0.36
+  h128_ls003    0.04,0.05
+```
 
 아래 2026-07-15 및 더 오래된 섹션은 과거 진행 로그다. 최신 기준은 위 2026-07-16 섹션이다.
 

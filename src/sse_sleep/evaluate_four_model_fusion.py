@@ -52,6 +52,9 @@ def build_grouped_class_weights(
     light_deep_primary: float,
     light_deep_secondary: float,
     light_deep_tertiary: float,
+    deep_primary: float,
+    deep_secondary: float,
+    deep_tertiary: float,
     rem_primary: float,
     rem_secondary: float,
     rem_tertiary: float,
@@ -61,10 +64,14 @@ def build_grouped_class_weights(
     tertiary_alphas = np.full(len(STAGE5_NAMES), float(light_deep_tertiary), dtype=np.float32)
 
     wake_index = STAGE5_TO_ID["Wake"]
+    deep_index = STAGE5_TO_ID["N3"]
     rem_index = STAGE5_TO_ID["REM"]
     primary_alphas[wake_index] = float(wake_primary)
     secondary_alphas[wake_index] = float(wake_secondary)
     tertiary_alphas[wake_index] = float(wake_tertiary)
+    primary_alphas[deep_index] = float(deep_primary)
+    secondary_alphas[deep_index] = float(deep_secondary)
+    tertiary_alphas[deep_index] = float(deep_tertiary)
     primary_alphas[rem_index] = float(rem_primary)
     secondary_alphas[rem_index] = float(rem_secondary)
     tertiary_alphas[rem_index] = float(rem_tertiary)
@@ -225,6 +232,9 @@ def evaluate_four_model_fusion(
     light_deep_primary_alphas: Sequence[float],
     light_deep_secondary_alphas: Sequence[float],
     light_deep_tertiary_alphas: Sequence[float],
+    deep_primary_alphas: Sequence[float] | None,
+    deep_secondary_alphas: Sequence[float] | None,
+    deep_tertiary_alphas: Sequence[float] | None,
     rem_primary_alphas: Sequence[float],
     rem_secondary_alphas: Sequence[float],
     rem_tertiary_alphas: Sequence[float],
@@ -293,67 +303,93 @@ def evaluate_four_model_fusion(
                         for light_deep_tertiary in light_deep_tertiary_alphas:
                             if light_deep_primary + light_deep_secondary + light_deep_tertiary > 1.0 + 1e-6:
                                 continue
-                            for rem_primary in rem_primary_alphas:
-                                for rem_secondary in rem_secondary_alphas:
-                                    for rem_tertiary in rem_tertiary_alphas:
-                                        if rem_primary + rem_secondary + rem_tertiary > 1.0 + 1e-6:
+                            deep_primary_values = (
+                                [light_deep_primary] if deep_primary_alphas is None else deep_primary_alphas
+                            )
+                            deep_secondary_values = (
+                                [light_deep_secondary] if deep_secondary_alphas is None else deep_secondary_alphas
+                            )
+                            deep_tertiary_values = (
+                                [light_deep_tertiary] if deep_tertiary_alphas is None else deep_tertiary_alphas
+                            )
+                            for deep_primary in deep_primary_values:
+                                for deep_secondary in deep_secondary_values:
+                                    for deep_tertiary in deep_tertiary_values:
+                                        if deep_primary + deep_secondary + deep_tertiary > 1.0 + 1e-6:
                                             continue
-                                        primary_alphas, secondary_alphas, tertiary_alphas = build_grouped_class_weights(
-                                            wake_primary=wake_primary,
-                                            wake_secondary=wake_secondary,
-                                            wake_tertiary=wake_tertiary,
-                                            light_deep_primary=light_deep_primary,
-                                            light_deep_secondary=light_deep_secondary,
-                                            light_deep_tertiary=light_deep_tertiary,
-                                            rem_primary=rem_primary,
-                                            rem_secondary=rem_secondary,
-                                            rem_tertiary=rem_tertiary,
-                                        )
-                                        fused_val = four_model_classwise_fusion(
-                                            base_val["probs"],
-                                            primary_val["probs"],
-                                            secondary_val["probs"],
-                                            tertiary_val["probs"],
-                                            primary_alphas,
-                                            secondary_alphas,
-                                            tertiary_alphas,
-                                        )
-                                        fused_test = four_model_classwise_fusion(
-                                            base_test["probs"],
-                                            primary_test["probs"],
-                                            secondary_test["probs"],
-                                            tertiary_test["probs"],
-                                            primary_alphas,
-                                            secondary_alphas,
-                                            tertiary_alphas,
-                                        )
-                                        records.append(
-                                            candidate_record(
-                                                name=(
-                                                    f"classwise4_w_p{wake_primary:.2f}_c{wake_secondary:.2f}"
-                                                    f"_l{wake_tertiary:.2f}"
-                                                    f"_ld_p{light_deep_primary:.2f}_c{light_deep_secondary:.2f}"
-                                                    f"_l{light_deep_tertiary:.2f}"
-                                                    f"_rem_p{rem_primary:.2f}_c{rem_secondary:.2f}"
-                                                    f"_l{rem_tertiary:.2f}"
-                                                ),
-                                                kind="classwise4_grouped",
-                                                params={
-                                                    "model_roles": {
-                                                        "base": "original_temporal",
-                                                        "primary": "full_w20",
-                                                        "secondary": "capacity_h128",
-                                                        "tertiary": "h128_ls003",
-                                                    },
-                                                    "class_primary_alphas": class_alpha_dict(primary_alphas),
-                                                    "class_secondary_alphas": class_alpha_dict(secondary_alphas),
-                                                    "class_tertiary_alphas": class_alpha_dict(tertiary_alphas),
-                                                },
-                                                val_metrics=evaluate_probs(base_val["y_true"], fused_val),
-                                                test_metrics=evaluate_probs(base_test["y_true"], fused_test),
-                                                selection_metric=selection_metric,
-                                            )
-                                        )
+                                        for rem_primary in rem_primary_alphas:
+                                            for rem_secondary in rem_secondary_alphas:
+                                                for rem_tertiary in rem_tertiary_alphas:
+                                                    if rem_primary + rem_secondary + rem_tertiary > 1.0 + 1e-6:
+                                                        continue
+                                                    primary_alphas, secondary_alphas, tertiary_alphas = (
+                                                        build_grouped_class_weights(
+                                                            wake_primary=wake_primary,
+                                                            wake_secondary=wake_secondary,
+                                                            wake_tertiary=wake_tertiary,
+                                                            light_deep_primary=light_deep_primary,
+                                                            light_deep_secondary=light_deep_secondary,
+                                                            light_deep_tertiary=light_deep_tertiary,
+                                                            deep_primary=deep_primary,
+                                                            deep_secondary=deep_secondary,
+                                                            deep_tertiary=deep_tertiary,
+                                                            rem_primary=rem_primary,
+                                                            rem_secondary=rem_secondary,
+                                                            rem_tertiary=rem_tertiary,
+                                                        )
+                                                    )
+                                                    fused_val = four_model_classwise_fusion(
+                                                        base_val["probs"],
+                                                        primary_val["probs"],
+                                                        secondary_val["probs"],
+                                                        tertiary_val["probs"],
+                                                        primary_alphas,
+                                                        secondary_alphas,
+                                                        tertiary_alphas,
+                                                    )
+                                                    fused_test = four_model_classwise_fusion(
+                                                        base_test["probs"],
+                                                        primary_test["probs"],
+                                                        secondary_test["probs"],
+                                                        tertiary_test["probs"],
+                                                        primary_alphas,
+                                                        secondary_alphas,
+                                                        tertiary_alphas,
+                                                    )
+                                                    records.append(
+                                                        candidate_record(
+                                                            name=(
+                                                                f"classwise4_w_p{wake_primary:.2f}"
+                                                                f"_c{wake_secondary:.2f}_l{wake_tertiary:.2f}"
+                                                                f"_li_p{light_deep_primary:.2f}"
+                                                                f"_c{light_deep_secondary:.2f}"
+                                                                f"_l{light_deep_tertiary:.2f}"
+                                                                f"_d_p{deep_primary:.2f}_c{deep_secondary:.2f}"
+                                                                f"_l{deep_tertiary:.2f}"
+                                                                f"_rem_p{rem_primary:.2f}_c{rem_secondary:.2f}"
+                                                                f"_l{rem_tertiary:.2f}"
+                                                            ),
+                                                            kind="classwise4_grouped",
+                                                            params={
+                                                                "model_roles": {
+                                                                    "base": "original_temporal",
+                                                                    "primary": "full_w20",
+                                                                    "secondary": "capacity_h128",
+                                                                    "tertiary": "h128_ls003",
+                                                                },
+                                                                "class_primary_alphas": class_alpha_dict(primary_alphas),
+                                                                "class_secondary_alphas": class_alpha_dict(
+                                                                    secondary_alphas
+                                                                ),
+                                                                "class_tertiary_alphas": class_alpha_dict(
+                                                                    tertiary_alphas
+                                                                ),
+                                                            },
+                                                            val_metrics=evaluate_probs(base_val["y_true"], fused_val),
+                                                            test_metrics=evaluate_probs(base_test["y_true"], fused_test),
+                                                            selection_metric=selection_metric,
+                                                        )
+                                                    )
 
     best, selection_details = select_best_record(
         records=records,
@@ -415,6 +451,9 @@ def main() -> None:
     parser.add_argument("--light-deep-primary-alphas", default="0.72,0.74,0.76")
     parser.add_argument("--light-deep-secondary-alphas", default="0,0.03")
     parser.add_argument("--light-deep-tertiary-alphas", default="0.12,0.15,0.18")
+    parser.add_argument("--deep-primary-alphas", default=None)
+    parser.add_argument("--deep-secondary-alphas", default=None)
+    parser.add_argument("--deep-tertiary-alphas", default=None)
     parser.add_argument("--rem-primary-alphas", default="0")
     parser.add_argument("--rem-secondary-alphas", default="0.25,0.30,0.32")
     parser.add_argument("--rem-tertiary-alphas", default="0,0.03")
@@ -455,6 +494,15 @@ def main() -> None:
         light_deep_primary_alphas=parse_float_list(args.light_deep_primary_alphas, default=[]),
         light_deep_secondary_alphas=parse_float_list(args.light_deep_secondary_alphas, default=[]),
         light_deep_tertiary_alphas=parse_float_list(args.light_deep_tertiary_alphas, default=[]),
+        deep_primary_alphas=(
+            None if args.deep_primary_alphas is None else parse_float_list(args.deep_primary_alphas, default=[])
+        ),
+        deep_secondary_alphas=(
+            None if args.deep_secondary_alphas is None else parse_float_list(args.deep_secondary_alphas, default=[])
+        ),
+        deep_tertiary_alphas=(
+            None if args.deep_tertiary_alphas is None else parse_float_list(args.deep_tertiary_alphas, default=[])
+        ),
         rem_primary_alphas=parse_float_list(args.rem_primary_alphas, default=[]),
         rem_secondary_alphas=parse_float_list(args.rem_secondary_alphas, default=[]),
         rem_tertiary_alphas=parse_float_list(args.rem_tertiary_alphas, default=[]),

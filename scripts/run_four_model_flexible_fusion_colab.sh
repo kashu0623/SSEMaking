@@ -4,8 +4,8 @@ set -euo pipefail
 # Four-model performance-first fusion:
 #   original temporal + full_w20 + capacity_h128 + h128_ls003
 #
-# Wake, Light/Deep, and REM use separate class-wise weights so the current
-# capacity_h128 best and h128_ls003 pure 4M+4K top can be combined.
+# Wake, Light(N1/N2)/Deep(N3), and REM can use separate class-wise weights.
+# If DEEP_* overrides are omitted, Deep keeps the same weights as Light.
 
 OUTPUT_ROOT="${OUTPUT_ROOT:-/content/drive/MyDrive/SSE_outputs}"
 CONTEXT_EPOCHS="${CONTEXT_EPOCHS:-20}"
@@ -29,6 +29,9 @@ WAKE_TERTIARY_ALPHAS="${WAKE_TERTIARY_ALPHAS:-0,0.03}"
 LIGHT_DEEP_PRIMARY_ALPHAS="${LIGHT_DEEP_PRIMARY_ALPHAS:-0.72,0.74,0.76}"
 LIGHT_DEEP_SECONDARY_ALPHAS="${LIGHT_DEEP_SECONDARY_ALPHAS:-0,0.03}"
 LIGHT_DEEP_TERTIARY_ALPHAS="${LIGHT_DEEP_TERTIARY_ALPHAS:-0.12,0.15,0.18}"
+DEEP_PRIMARY_ALPHAS="${DEEP_PRIMARY_ALPHAS:-}"
+DEEP_SECONDARY_ALPHAS="${DEEP_SECONDARY_ALPHAS:-}"
+DEEP_TERTIARY_ALPHAS="${DEEP_TERTIARY_ALPHAS:-}"
 REM_PRIMARY_ALPHAS="${REM_PRIMARY_ALPHAS:-0}"
 REM_SECONDARY_ALPHAS="${REM_SECONDARY_ALPHAS:-0.25,0.30,0.32}"
 REM_TERTIARY_ALPHAS="${REM_TERTIARY_ALPHAS:-0,0.03}"
@@ -38,6 +41,17 @@ if [[ "${FUSION_SELECTION_POLICY}" != "standard" ]]; then
   report_suffix="_${FUSION_SELECTION_POLICY}"
 fi
 report_suffix="${report_suffix}${FUSION_REPORT_SUFFIX}"
+
+deep_args=()
+if [[ -n "${DEEP_PRIMARY_ALPHAS}" ]]; then
+  deep_args+=(--deep-primary-alphas "${DEEP_PRIMARY_ALPHAS}")
+fi
+if [[ -n "${DEEP_SECONDARY_ALPHAS}" ]]; then
+  deep_args+=(--deep-secondary-alphas "${DEEP_SECONDARY_ALPHAS}")
+fi
+if [[ -n "${DEEP_TERTIARY_ALPHAS}" ]]; then
+  deep_args+=(--deep-tertiary-alphas "${DEEP_TERTIARY_ALPHAS}")
+fi
 
 prediction_path_for_seed() {
   local model_prefix="$1"
@@ -140,6 +154,7 @@ for seed in "${SEEDS[@]}"; do
     --light-deep-primary-alphas "${LIGHT_DEEP_PRIMARY_ALPHAS}" \
     --light-deep-secondary-alphas "${LIGHT_DEEP_SECONDARY_ALPHAS}" \
     --light-deep-tertiary-alphas "${LIGHT_DEEP_TERTIARY_ALPHAS}" \
+    "${deep_args[@]}" \
     --rem-primary-alphas "${REM_PRIMARY_ALPHAS}" \
     --rem-secondary-alphas "${REM_SECONDARY_ALPHAS}" \
     --rem-tertiary-alphas "${REM_TERTIARY_ALPHAS}" \
