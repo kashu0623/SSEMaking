@@ -2,6 +2,58 @@
 
 이 문서는 DreamT 기반 수면 단계 예측 모델 개발을 다음 채팅방에서 이어가기 위한 요약이다.
 
+## 새 채팅방 빠른 시작
+
+다음 채팅방은 아래 2026-07-16 섹션만 우선 읽으면 된다. 2026-07-15 및 더 오래된 섹션은 과거 로그다.
+
+현재 목표:
+
+```text
+비용/추론량은 무시한다.
+무조건 성능-only 기준으로 best fixed/flexible fusion을 갱신한다.
+3-seed 평균에서 4M+4K가 가장 높은 후보를 기본 best로 두되,
+4M+4K 차이가 0.0005 이하이면 Wake+REM이 높은 후보를 우선한다.
+```
+
+현재 best:
+
+```text
+4-model grouped flexible fusion
+classwise4_w_p0.77_c0.10_l0.00_ld_p0.76_c0.02_l0.17_rem_p0.00_c0.34_l0.04
+
+models:
+1. original temporal = lstm_temporal_context20_h64_inverse
+2. full w20 = lstm_temporal_w20_context20_h64_inverse
+3. capacity_h128 = lstm_temporal_w20_context20_inverse_capacity_h128
+4. h128_ls003 = lstm_temporal_w20_context20_inverse_h128_ls003
+
+3-seed mean:
+4M 0.4128 / 4K 0.2543 / Wake 0.5083 / Light 0.6372 / Deep 0.1252 / REM 0.3805
+```
+
+다음에 바로 실행할 실험:
+
+```bash
+%cd /content/SSE
+!git pull
+!bash scripts/run_four_model_flex4_stage_refinement_colab.sh
+```
+
+이 실험은 기존 `Light/Deep` 공통 weight를 풀고, `Light=N1+N2`와 `Deep=N3`를 따로 탐색한다.
+
+다음 채팅방 시작 프롬프트:
+
+```text
+docs/next_chat_handoff.md를 읽고 이어서 진행해줘.
+현재 목표는 비용 무시, 성능-only fixed/flexible fusion 개선이야.
+현재 best는 4-model grouped flexible fusion:
+classwise4_w_p0.77_c0.10_l0.00_ld_p0.76_c0.02_l0.17_rem_p0.00_c0.34_l0.04
+3-seed 평균 4M 0.4128 / 4K 0.2543 / Wake 0.5083 / Light 0.6372 / Deep 0.1252 / REM 0.3805.
+다음 실험은 Light(N1/N2)와 Deep(N3)을 분리하는 flex4_stage_refine부터 진행해줘.
+Colab에서는 git pull 후 scripts/run_four_model_flex4_stage_refinement_colab.sh를 실행하면 돼.
+결과 summary JSON을 받으면 current best 대비 4M+4K, Wake+REM, Light/Deep/REM 변화를 비교하고 handoff를 갱신해줘.
+```
+
 ## 최신 상태 요약: 2026-07-16
 
 아래 2026-07-15 및 2026-07-14 섹션은 과거 진행 로그로 보존한다. 다음 채팅방은 이 2026-07-16 섹션을 최우선 기준으로 이어가면 된다.
@@ -2231,9 +2283,12 @@ scripts/run_learning_improvement_colab.sh
 다음 채팅방에는 이 파일을 올리고 이렇게 시작하면 된다.
 
 ```text
-이전 채팅방에서 DreamT data_100Hz 기반 수면 단계 예측 파이프라인을 여기까지 진행했다.
-docs/next_chat_handoff.md 내용을 읽고 이어서 진행해줘.
-현재 앱/4-class 관점 best 후보는 full w20 = temporal_w20 context20 h64 inverse 1.0x다.
-targeted/long-window ablation과 causal baseline 일부 실험은 완료했고 모두 full w20을 넘지 못했다.
-다음 작업은 causal per-night baseline에서 bvp_std 역할을 분리하기 위해 bvp_baseline, bvp_cardio_baseline, bvp_temp_baseline variant를 추가하고 seed42부터 진행해줘.
+docs/next_chat_handoff.md를 읽고 이어서 진행해줘.
+현재 목표는 비용 무시, 성능-only fixed/flexible fusion 개선이야.
+현재 best는 4-model grouped flexible fusion:
+classwise4_w_p0.77_c0.10_l0.00_ld_p0.76_c0.02_l0.17_rem_p0.00_c0.34_l0.04
+3-seed 평균 4M 0.4128 / 4K 0.2543 / Wake 0.5083 / Light 0.6372 / Deep 0.1252 / REM 0.3805.
+다음 실험은 Light(N1/N2)와 Deep(N3)을 분리하는 flex4_stage_refine부터 진행해줘.
+Colab에서는 git pull 후 scripts/run_four_model_flex4_stage_refinement_colab.sh를 실행하면 돼.
+결과 summary JSON을 받으면 current best 대비 4M+4K, Wake+REM, Light/Deep/REM 변화를 비교하고 handoff를 갱신해줘.
 ```
