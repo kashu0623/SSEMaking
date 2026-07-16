@@ -317,23 +317,31 @@ Wake+REM은 selected current가 0.0012 높다.
 
 4-model grouped fusion이 유효하게 상승했으므로, 다음은 새 best 근방만 더 좁게 판다.
 
+실행:
+
+```bash
+%cd /content/SSE
+!git pull
+!bash scripts/run_four_model_flex4_refinement_colab.sh
+```
+
 추천 refinement:
 
 ```text
 Wake:
   full_w20       0.77,0.78,0.79
   capacity_h128 0.08,0.10,0.12
-  h128_ls003    0,0.02,0.04
+  h128_ls003    0,0.02
 
 Light/Deep:
-  full_w20       0.73,0.74,0.75,0.76,0.77
-  capacity_h128 0,0.02,0.03,0.04
-  h128_ls003    0.13,0.15,0.17,0.19
+  full_w20       0.74,0.75,0.76
+  capacity_h128 0,0.02,0.03
+  h128_ls003    0.15,0.17,0.18
 
 REM:
   full_w20       0
   capacity_h128 0.30,0.32,0.34
-  h128_ls003    0.02,0.03,0.04,0.05
+  h128_ls003    0.02,0.03,0.04
 ```
 
 판정은 동일하게 4M+4K 1위가 기본이며, 0.0005 이내이면 Wake+REM이 높은 쪽을 우선한다.
