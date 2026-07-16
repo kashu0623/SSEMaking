@@ -23,8 +23,8 @@ production-safe previous best:
 2-model fixed fusion classwise_nonrem0.90_rem0.20
 
 current performance-only best:
-3-model fixed fusion
-classwise3_nonrem_p0.78_s0.12_rem_p0.00_s0.30
+4-model grouped flexible fusion
+classwise4_w_p0.78_c0.10_l0.00_ld_p0.74_c0.00_l0.15_rem_p0.00_c0.32_l0.03
 ```
 
 current performance-only best 구성:
@@ -34,16 +34,25 @@ models:
 1. original temporal = lstm_temporal_context20_h64_inverse
 2. full w20 = lstm_temporal_w20_context20_h64_inverse
 3. capacity_h128 = lstm_temporal_w20_context20_inverse_capacity_h128
+4. h128_ls003 = lstm_temporal_w20_context20_inverse_h128_ls003
 
-Wake/Light/Deep:
-  0.10 * original temporal
+Wake:
+  0.12 * original temporal
   0.78 * full_w20
-  0.12 * capacity_h128
+  0.10 * capacity_h128
+  0.00 * h128_ls003
+
+Light/Deep:
+  0.11 * original temporal
+  0.74 * full_w20
+  0.00 * capacity_h128
+  0.15 * h128_ls003
 
 REM:
-  0.70 * original temporal
+  0.65 * original temporal
   0.00 * full_w20
-  0.30 * capacity_h128
+  0.32 * capacity_h128
+  0.03 * h128_ls003
 ```
 
 3-seed 평균 비교:
@@ -53,28 +62,30 @@ variant                                      4 Macro  4 Kappa  Wake    Light   D
 previous fixed 2-model nonrem0.90_rem0.20    0.4074   0.2458   0.5034  0.6321  0.1220  0.3722
 prev 3-model best p0.80_s0.15_rem0.00_s0.20  0.4101   0.2486   0.5036  0.6344  0.1256  0.3766
 prev current p0.78_s0.10_rem0.00_s0.25       0.4102   0.2515   0.5077  0.6345  0.1208  0.3780
-current best p0.78_s0.12_rem0.00_s0.30       0.4109   0.2517   0.5069  0.6360  0.1219  0.3787
+prev current p0.78_s0.12_rem0.00_s0.30       0.4109   0.2517   0.5069  0.6360  0.1219  0.3787
+current 4-model grouped flex4 selected        0.4120   0.2541   0.5086  0.6361  0.1227  0.3805
 ```
 
 current best vs previous fixed 2-model:
 
 ```text
-4 Macro +0.0035 (+0.85%)
-4 Kappa +0.0059 (+2.40%)
-Wake    +0.0035 (+0.69%)
-Light   +0.0039 (+0.62%)
-Deep    -0.0000 (-0.03%)
-REM     +0.0065 (+1.76%)
+4 Macro +0.0046 (+1.12%)
+4 Kappa +0.0082 (+3.35%)
+Wake    +0.0052 (+1.03%)
+Light   +0.0040 (+0.63%)
+Deep    +0.0008 (+0.65%)
+REM     +0.0083 (+2.24%)
 ```
 
 해석:
 
 ```text
-ultra_refine 결과 성능-only 기준 current best는 capacity_h128 classwise3_nonrem_p0.78_s0.12_rem_p0.00_s0.30이다.
-순수 4M+4K 최고는 h128_ls003 classwise3_nonrem_p0.74_s0.15_rem_p0.00_s0.30
-(4M 0.4107 / 4K 0.2525)이지만, current best와 4M+4K 차이가 0.0005 이내이고
-Wake+REM은 capacity_h128 p0.78_s0.12/rem_s0.30이 더 높다.
-따라서 handoff 판정 규칙에 따라 capacity_h128 p0.78_s0.12/rem_s0.30을 새 best로 둔다.
+4-model flexible fusion 결과 current performance-only best는
+classwise4_w_p0.78_c0.10_l0.00_ld_p0.74_c0.00_l0.15_rem_p0.00_c0.32_l0.03이다.
+순수 4M+4K 최고는 classwise4_w_p0.78_c0.10_l0.00_ld_p0.76_c0.03_l0.15_rem_p0.00_c0.32_l0.03
+(4M 0.4123 / 4K 0.2539)이지만, selected current와 4M+4K 차이가 0.0005 이내이고
+Wake+REM은 selected current가 더 높다.
+따라서 handoff 판정 규칙에 따라 Wake+REM 우위 후보를 새 best로 둔다.
 ```
 
 ### 2026-07-16 진행된 실험 요약
@@ -240,16 +251,10 @@ Wake +0.0015 / REM +0.0033이므로 새 current performance-only best로 둔다.
 Deep/Light를 더 중시하는 의사결정이 생기면 h128_ls003 p0.74_s0.15/rem_s0.30도 동률권 후보로 남긴다.
 ```
 
-### 다음 채팅방에서 바로 이어갈 실험
+#### 6. 4-model grouped flexible fusion 결과
 
-현재 top 영역은 ultra_refine 후에도 매우 평평하다. 새 모델 학습보다 먼저 위 두 fixed-weight 후보의
-seed별 분산과 class confusion을 비교해, Wake/REM 우선 정책을 유지할지 Deep/Light 보존 쪽으로
-판정 기준을 바꿀지 결정하는 것이 좋다.
-
-#### 1순위: 4-model grouped flexible fusion
-
-다음 성능 향상 후보는 3-model fusion의 non-REM 공통 weight 제약을 풀고,
-Wake / Light+Deep / REM 그룹별로 capacity_h128와 h128_ls003를 다르게 섞는 것이다.
+3-model fusion의 non-REM 공통 weight 제약을 풀고, Wake / Light+Deep / REM 그룹별로
+capacity_h128와 h128_ls003를 다르게 섞었다.
 
 구현:
 
@@ -258,15 +263,7 @@ src/sse_sleep/evaluate_four_model_fusion.py
 scripts/run_four_model_flexible_fusion_colab.sh
 ```
 
-실행:
-
-```bash
-%cd /content/SSE
-!git pull
-!bash scripts/run_four_model_flexible_fusion_colab.sh
-```
-
-기본 grid:
+grid:
 
 ```text
 models:
@@ -294,10 +291,52 @@ REM:
 판정:
 
 ```text
-기존 current best capacity_h128 p0.78_s0.12/rem_s0.30을 reference로 함께 기록한다.
-4M+4K가 current best보다 높고, 0.0005 이내 동률이면 Wake+REM이 높은 후보를 우선한다.
-Light/Deep이 크게 좋아졌지만 Wake/REM이 내려간 경우는 별도 후보로 보존한다.
+순수 4M+4K 최고:
+classwise4_w_p0.78_c0.10_l0.00_ld_p0.76_c0.03_l0.15_rem_p0.00_c0.32_l0.03
+4M 0.4123 / 4K 0.2539 / Wake 0.5081 / Light 0.6370 / Deep 0.1245 / REM 0.3798
+
+tie-band selected current:
+classwise4_w_p0.78_c0.10_l0.00_ld_p0.74_c0.00_l0.15_rem_p0.00_c0.32_l0.03
+4M 0.4120 / 4K 0.2541 / Wake 0.5086 / Light 0.6361 / Deep 0.1227 / REM 0.3805
+
+기존 3-model current best 대비 selected current:
+4 Macro +0.0011 (+0.27%)
+4 Kappa +0.0023 (+0.93%)
+Wake    +0.0017 (+0.34%)
+Light   +0.0001 (+0.02%)
+Deep    +0.0008 (+0.67%)
+REM     +0.0018 (+0.47%)
+4M+4K   +0.0035 (+0.52%)
+
+순수 4M+4K 최고는 selected current보다 4M+4K가 0.0001 높지만,
+Wake+REM은 selected current가 0.0012 높다.
+따라서 기존 tie-band 규칙에 따라 selected current를 새 performance-only best로 둔다.
 ```
+
+### 다음 채팅방에서 바로 이어갈 실험
+
+4-model grouped fusion이 유효하게 상승했으므로, 다음은 새 best 근방만 더 좁게 판다.
+
+추천 refinement:
+
+```text
+Wake:
+  full_w20       0.77,0.78,0.79
+  capacity_h128 0.08,0.10,0.12
+  h128_ls003    0,0.02,0.04
+
+Light/Deep:
+  full_w20       0.73,0.74,0.75,0.76,0.77
+  capacity_h128 0,0.02,0.03,0.04
+  h128_ls003    0.13,0.15,0.17,0.19
+
+REM:
+  full_w20       0
+  capacity_h128 0.30,0.32,0.34
+  h128_ls003    0.02,0.03,0.04,0.05
+```
+
+판정은 동일하게 4M+4K 1위가 기본이며, 0.0005 이내이면 Wake+REM이 높은 쪽을 우선한다.
 
 아래 2026-07-15 및 더 오래된 섹션은 과거 진행 로그다. 최신 기준은 위 2026-07-16 섹션이다.
 
