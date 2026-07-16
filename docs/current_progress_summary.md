@@ -1,7 +1,7 @@
 # SSE 현재 진행 요약
 
 이 문서는 DreamT 수면 단계 예측 실험의 최신 진행 상황만 정리하는 rolling summary다.
-기존 `docs/next_chat_handoff.md`는 과거 채팅방 로그 보존용으로 두고, 앞으로 다음 채팅방 인계와 현재 best/next experiment는 이 파일을 기준으로 갱신한다.
+`docs/next_chat_handoff.md`는 다음 채팅방에 그대로 전달할 최소 프롬프트만 담고, 현재 best/next experiment/결과 비교 이력은 이 파일을 기준으로 갱신한다.
 
 ## 현재 목표
 
@@ -188,4 +188,3 @@ classwise4_w_p0.77_c0.10_l0.00_ld_p0.76_c0.02_l0.17_rem_p0.00_c0.34_l0.04
 Colab에서는 git pull 후 scripts/run_four_model_flex4_stage_refinement_colab.sh를 실행하면 돼.
 결과 summary JSON을 받으면 current best 대비 4M+4K, Wake+REM, Light/Deep/REM 변화를 비교하고 이 current_progress_summary.md를 갱신해줘.
 ```
-
