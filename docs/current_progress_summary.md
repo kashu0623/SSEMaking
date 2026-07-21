@@ -18,7 +18,7 @@
 
 ```text
 4-model stage-split flexible fusion
-classwise4_w_p0.77_c0.04_l0.00_li_p0.78_c0.02_l0.17_d_p0.76_c0.01_l0.18_rem_p0.00_c0.44_l0.11
+classwise4_w_p0.78_c0.04_l0.00_li_p0.79_c0.02_l0.15_d_p0.75_c0.01_l0.20_rem_p0.00_c0.42_l0.12
 ```
 
 사용 모델:
@@ -34,23 +34,23 @@ classwise4_w_p0.77_c0.04_l0.00_li_p0.78_c0.02_l0.17_d_p0.76_c0.01_l0.18_rem_p0.0
 
 ```text
 Wake:
-  original 0.19 / full_w20 0.77 / capacity_h128 0.04 / h128_ls003 0.00
+  original 0.18 / full_w20 0.78 / capacity_h128 0.04 / h128_ls003 0.00
 
 Light(N1/N2):
-  original 0.03 / full_w20 0.78 / capacity_h128 0.02 / h128_ls003 0.17
+  original 0.04 / full_w20 0.79 / capacity_h128 0.02 / h128_ls003 0.15
 
 Deep(N3):
-  original 0.05 / full_w20 0.76 / capacity_h128 0.01 / h128_ls003 0.18
+  original 0.04 / full_w20 0.75 / capacity_h128 0.01 / h128_ls003 0.20
 
 REM:
-  original 0.45 / full_w20 0.00 / capacity_h128 0.44 / h128_ls003 0.11
+  original 0.46 / full_w20 0.00 / capacity_h128 0.42 / h128_ls003 0.12
 ```
 
 3-seed 평균:
 
 ```text
-4M 0.4142 / 4K 0.2571
-Wake 0.5086 / Light 0.6414 / Deep 0.1244 / REM 0.3822
+4M 0.4143 / 4K 0.2571
+Wake 0.5084 / Light 0.6414 / Deep 0.1243 / REM 0.3829
 ```
 
 ## 이전 기준 대비 향상
@@ -66,12 +66,12 @@ Wake 0.5034 / Light 0.6321 / Deep 0.1220 / REM 0.3722
 현재 best 대비:
 
 ```text
-4 Macro +0.0067 (+1.65%)
+4 Macro +0.0068 (+1.68%)
 4 Kappa +0.0113 (+4.58%)
-Wake    +0.0052 (+1.03%)
+Wake    +0.0050 (+1.00%)
 Light   +0.0093 (+1.47%)
-Deep    +0.0025 (+2.03%)
-REM     +0.0100 (+2.69%)
+Deep    +0.0024 (+1.93%)
+REM     +0.0107 (+2.87%)
 ```
 
 ## 최근 실험 흐름
@@ -115,8 +115,13 @@ REM     +0.0100 (+2.69%)
 
 9. 4-model flex4 stage-split refine round5
    round4 best에서 edge에 닿은 Light/REM 축 확장
-   현재 best 도출
+   stage-split best 도출
    4M 0.4142 / 4K 0.2571
+
+10. 4-model flex4 stage-split refine round6
+    round5 best와 pure top 사이 동시 탐색
+    현재 best 도출
+    4M 0.4143 / 4K 0.2571
 ```
 
 flex4_refine에서 pure 4M+4K top은 아래 후보였다.
@@ -253,6 +258,31 @@ Wake+REM +0.0006
 Wake -0.0004 / Light +0.0009 / Deep -0.0007 / REM +0.0010
 ```
 
+flex4_stage_refine_round6 결과 pure 4M+4K top은 아래 후보였다.
+
+```text
+classwise4_w_p0.77_c0.04_l0.00_li_p0.78_c0.04_l0.17_d_p0.77_c0.00_l0.16_rem_p0.00_c0.42_l0.12
+4M 0.4144 / 4K 0.2574 / Wake 0.5087 / Light 0.6420 / Deep 0.1253 / REM 0.3818
+4M+4K 0.6718 / Wake+REM 0.8905
+```
+
+현재 best는 pure top 대비 4M+4K가 0.0005 낮아 tie band 안에 있고, Wake+REM이 더 높아서 선택 기준상 우선된다.
+
+```text
+classwise4_w_p0.78_c0.04_l0.00_li_p0.79_c0.02_l0.15_d_p0.75_c0.01_l0.20_rem_p0.00_c0.42_l0.12
+4M 0.4143 / 4K 0.2571 / Wake 0.5084 / Light 0.6414 / Deep 0.1243 / REM 0.3829
+4M+4K 0.6714 / Wake+REM 0.8913
+```
+
+이전 round5 best 대비:
+
+```text
+4M+4K +0.0001
+Wake+REM +0.0005
+4 Macro +0.0001 / 4 Kappa -0.0000
+Wake -0.0002 / Light +0.0000 / Deep -0.0001 / REM +0.0007
+```
+
 ## 현재 코드 상태
 
 최근 추가된 핵심 스크립트:
@@ -264,6 +294,7 @@ scripts/run_four_model_flex4_stage_refinement_round3_colab.sh
 scripts/run_four_model_flex4_stage_refinement_round4_colab.sh
 scripts/run_four_model_flex4_stage_refinement_round5_colab.sh
 scripts/run_four_model_flex4_stage_refinement_round6_colab.sh
+scripts/run_four_model_flex4_stage_refinement_round7_colab.sh
 ```
 
 기능:
@@ -410,36 +441,10 @@ Colab 실행:
 /Users/chan/Downloads/fusion4_original_full_w20_capacity_h128_ls003_context20_h64_flex4_stage_refine_round5_summary.json
 ```
 
-## 다음 실험
-
-우선순위 1:
+완료:
 
 ```text
 round5 best와 pure top 사이를 같이 덮는 flex4_stage_refine_round6
-```
-
-권장 grid:
-
-```text
-Wake:
-  full_w20 0.77,0.78
-  capacity_h128 0.02,0.04,0.06
-  h128_ls003 0
-
-Light(N1/N2):
-  full_w20 0.78,0.79
-  capacity_h128 0.02,0.04
-  h128_ls003 0.15,0.17,0.19
-
-Deep(N3):
-  full_w20 0.75,0.76,0.77
-  capacity_h128 0,0.01,0.02
-  h128_ls003 0.16,0.18,0.20
-
-REM:
-  full_w20 0
-  capacity_h128 0.42,0.44,0.46
-  h128_ls003 0.10,0.11,0.12
 ```
 
 Colab 실행:
@@ -450,14 +455,60 @@ Colab 실행:
 !bash scripts/run_four_model_flex4_stage_refinement_round6_colab.sh
 ```
 
+결과 summary JSON:
+
+```text
+/Users/chan/Downloads/fusion4_original_full_w20_capacity_h128_ls003_context20_h64_flex4_stage_refine_round6_summary.json
+```
+
+## 다음 실험
+
+우선순위 1:
+
+```text
+round6 best의 Wake+REM 우세 후보와 pure top 후보를 같이 덮는 flex4_stage_refine_round7
+```
+
+권장 grid:
+
+```text
+Wake:
+  full_w20 0.78,0.79
+  capacity_h128 0.02,0.04,0.06
+  h128_ls003 0
+
+Light(N1/N2):
+  full_w20 0.78,0.79
+  capacity_h128 0.02,0.04
+  h128_ls003 0.13,0.15,0.17
+
+Deep(N3):
+  full_w20 0.74,0.75,0.76,0.77
+  capacity_h128 0,0.01,0.02
+  h128_ls003 0.18,0.20,0.22
+
+REM:
+  full_w20 0
+  capacity_h128 0.42,0.44
+  h128_ls003 0.12,0.13
+```
+
+Colab 실행:
+
+```bash
+%cd /content/SSE
+!git pull
+!bash scripts/run_four_model_flex4_stage_refinement_round7_colab.sh
+```
+
 비교 포인트:
 
 ```text
 1. 현재 stage-split best 대비 4M+4K 변화
 2. tie band 안에서는 Wake+REM 변화
-3. Pure top 쪽의 Light/Deep 회복이 tie band 안에서 Wake+REM을 유지하는지
-4. REM 0.382+를 유지하면서 Deep을 0.125 근방으로 회복할 수 있는지
-5. Wake가 0.5085 아래로 더 밀리지 않는지
+3. REM 0.3828+를 유지하면서 Wake를 0.5085 이상으로 회복할 수 있는지
+4. pure top 쪽 Light 0.642와 Deep 0.125+ 회복이 tie band 안에 남는지
+5. 4M+4K 개선이 0.0005를 넘는 새 후보가 나오는지
 ```
 
 ## 다음 채팅방 시작 프롬프트
@@ -466,9 +517,9 @@ Colab 실행:
 docs/current_progress_summary.md를 읽고 이어서 진행해줘.
 현재 목표는 비용 무시, 성능-only fixed/flexible fusion 개선이야.
 현재 best는 4-model stage-split flexible fusion:
-classwise4_w_p0.77_c0.04_l0.00_li_p0.78_c0.02_l0.17_d_p0.76_c0.01_l0.18_rem_p0.00_c0.44_l0.11
-3-seed 평균은 4M 0.4142 / 4K 0.2571 / Wake 0.5086 / Light 0.6414 / Deep 0.1244 / REM 0.3822.
-다음 실험은 round5 best와 pure top 사이를 같이 덮는 flex4_stage_refine_round6야.
-Colab에서는 git pull 후 scripts/run_four_model_flex4_stage_refinement_round6_colab.sh를 실행하면 돼.
+classwise4_w_p0.78_c0.04_l0.00_li_p0.79_c0.02_l0.15_d_p0.75_c0.01_l0.20_rem_p0.00_c0.42_l0.12
+3-seed 평균은 4M 0.4143 / 4K 0.2571 / Wake 0.5084 / Light 0.6414 / Deep 0.1243 / REM 0.3829.
+다음 실험은 round6 best의 Wake+REM 우세 후보와 pure top 후보를 같이 덮는 flex4_stage_refine_round7야.
+Colab에서는 git pull 후 scripts/run_four_model_flex4_stage_refinement_round7_colab.sh를 실행하면 돼.
 결과 summary JSON을 받으면 current best 대비 4M+4K, Wake+REM, Light/Deep/REM 변화를 비교하고 이 current_progress_summary.md를 갱신해줘.
 ```
