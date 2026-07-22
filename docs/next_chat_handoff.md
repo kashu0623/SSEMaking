@@ -18,13 +18,14 @@ classwise4_w_p0.72_c0.06_l0.00_li_p0.80_c0.02_l0.15_d_p0.82_c0.00_l0.18_rem_p0.0
 3-seed 평균에서 4M+4K가 가장 높은 후보를 best로 둔다.
 단, 4M+4K 차이가 0.0005 이하이면 Wake+REM이 더 높은 후보를 우선한다.
 
-다음 실험은 flex4_kappa_refine_round7의 lower wake-primary edge와 REM 근방을 보는 flex4_kappa_refine_round8부터 진행해줘.
+다음 실험은 current 4-model pool의 dynamic gating headroom을 재는 four_model_oracle_audit부터 진행해줘.
 
 Colab 실행:
 %cd /content/SSE
 !git pull
-!bash scripts/run_four_model_flex4_kappa_refinement_round8_colab.sh
+!bash scripts/run_four_model_oracle_audit_colab.sh
 
-결과 summary JSON을 받으면 best_by_4K와 기존 선택 기준 overall best를 둘 다 current best 대비 비교하고,
-새 best 채택 여부와 구 best 대비 % 상승률을 판단한 뒤 docs/current_progress_summary.md를 갱신해줘.
+결과 summary JSON을 받으면 fusion 오답 recoverable 비율, oracle 4M+4K headroom,
+stage별 oracle recall과 capacity_h128의 Deep rescue를 분석해서 dynamic gate/Deep gate/new architecture 중
+다음 방향을 정한 뒤 docs/current_progress_summary.md를 갱신해줘.
 ```

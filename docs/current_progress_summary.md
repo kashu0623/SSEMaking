@@ -549,6 +549,7 @@ scripts/run_four_model_flex4_kappa_refinement_round5_colab.sh
 scripts/run_four_model_flex4_kappa_refinement_round6_colab.sh
 scripts/run_four_model_flex4_kappa_refinement_round7_colab.sh
 scripts/run_four_model_flex4_kappa_refinement_round8_colab.sh
+scripts/run_four_model_oracle_audit_colab.sh
 ```
 
 기능:
@@ -568,6 +569,22 @@ src/sse_sleep/evaluate_four_model_fusion.py
 ```
 
 `DEEP_*` 환경변수를 주지 않으면 기존 grouped Light+Deep 동작을 유지한다.
+
+고정 weight refinement의 headroom을 판단하기 위한 compact oracle audit 평가기도 추가되어 있다.
+
+```text
+src/sse_sleep/evaluate_four_model_oracle_audit.py
+```
+
+기능:
+
+```text
+1. current best fusion 오답 중 기존 4개 모델 하나라도 정답인 비율
+2. Wake/Light/Deep/REM별 fusion recall과 oracle recall 상한
+3. 모델별 rescue/exclusive rescue 비율과 rescue confidence
+4. 모델 쌍별 prediction disagreement, joint error, error Jaccard
+5. val/test 3-seed 평균을 하나의 작은 summary JSON으로 출력
+```
 
 ## 최근 완료 실험
 
@@ -860,52 +877,61 @@ Colab 실행:
 우선순위 1:
 
 ```text
-flex4_kappa_refine_round7의 lower wake-primary edge와 REM 근방을 보는 flex4_kappa_refine_round8
+현재 4-model pool의 dynamic gating headroom을 재는 four_model_oracle_audit
 ```
 
-권장 grid:
+목적:
 
 ```text
-Wake:
-  full_w20 0.71,0.72,0.73
-  capacity_h128 0.06,0.08
-  h128_ls003 0
+고정 classwise weight refinement가 포화된 상태에서
+sample별 dynamic gate가 실제로 복구할 수 있는 fusion 오답의 상한을 확인한다.
 
-Light(N1/N2):
-  full_w20 0.80,0.82,0.83
-  capacity_h128 0.02
-  h128_ls003 0.13,0.15
-
-Deep(N3):
-  full_w20 0.81,0.82,0.83
-  capacity_h128 0
-  h128_ls003 0.18,0.20
-
-REM:
-  full_w20 0
-  capacity_h128 0.40,0.42
-  h128_ls003 0.13,0.14
+특히 capacity_h128 단일 모델의 Deep F1은 0.1524로 current fusion Deep 0.1274보다 높으므로,
+capacity가 맞는 Deep epoch만 선택적으로 사용할 수 있는지 확인한다.
 ```
 
-후보 수를 약 0.9k로 제한해서 summary JSON이 너무 커지지 않도록 한다.
+학습이나 grid search 없이 기존 prediction NPZ만 읽으며, 후보 전체를 저장하지 않아 summary JSON은 작다.
 
 Colab 실행:
 
 ```bash
 %cd /content/SSE
 !git pull
-!bash scripts/run_four_model_flex4_kappa_refinement_round8_colab.sh
+!bash scripts/run_four_model_oracle_audit_colab.sh
+```
+
+결과 summary JSON:
+
+```text
+/content/drive/MyDrive/SSE_outputs/fusion4_current_best_oracle_audit_context20_h64_summary.json
 ```
 
 비교 포인트:
 
 ```text
-1. best_by_4K가 0.2575~0.2580에 도달하는지
-2. best_by_4K의 4M+4K가 current best와 얼마나 차이 나는지
-3. 새 best가 나오면 이전 current best 대비 절대 변화와 % 변화를 같이 기록
-4. 기존 선택 기준상 overall best도 갱신되는지
-5. lower wake-primary edge가 4M+4K와 Wake+REM을 더 올리는지
+1. test 3-seed fusion 오답 중 any-model recoverable 비율
+2. oracle 4M+4K와 current best 4M+4K의 차이
+3. Deep fusion recall -> oracle recall headroom
+4. capacity_h128의 Deep rescue 수와 exclusive rescue 비율
+5. 모델 disagreement 구간에서 current fusion accuracy가 얼마나 낮아지는지
+6. pairwise joint error/error Jaccard가 낮은 모델 조합
 ```
+
+결과에 따른 다음 분기:
+
+```text
+oracle headroom이 충분함:
+  same-split multi-init ensemble 후 causal temporal dynamic gate를 학습한다.
+
+전체 headroom은 작지만 Deep headroom이 큼:
+  Deep 전용 gate + duration/transition decoder를 먼저 학습한다.
+
+oracle headroom도 작음:
+  기존 LSTM weight refinement를 멈추고 오류 성격이 다른 multi-scale TCN/Transformer를 추가한다.
+```
+
+보조 실험으로 `scripts/run_four_model_flex4_kappa_refinement_round8_colab.sh`도 준비되어 있지만,
+최근 round 상승폭이 seed 변동보다 훨씬 작으므로 oracle audit보다 우선하지 않는다.
 
 ## 다음 채팅방 시작 프롬프트
 
@@ -915,7 +941,7 @@ docs/current_progress_summary.md를 읽고 이어서 진행해줘.
 현재 best는 4-model stage-split flexible fusion:
 classwise4_w_p0.72_c0.06_l0.00_li_p0.80_c0.02_l0.15_d_p0.82_c0.00_l0.18_rem_p0.00_c0.42_l0.13
 3-seed 평균은 4M 0.4153 / 4K 0.2581 / Wake 0.5099 / Light 0.6414 / Deep 0.1274 / REM 0.3825.
-다음 실험은 flex4_kappa_refine_round7의 lower wake-primary edge와 REM 근방을 보는 flex4_kappa_refine_round8이야.
-Colab에서는 git pull 후 scripts/run_four_model_flex4_kappa_refinement_round8_colab.sh를 실행하면 돼.
-결과 summary JSON을 받으면 best_by_4K와 기존 선택 기준 overall best를 둘 다 current best 대비 비교하고 이 current_progress_summary.md를 갱신해줘.
+다음 실험은 current 4-model pool의 dynamic gating headroom을 재는 four_model_oracle_audit이야.
+Colab에서는 git pull 후 scripts/run_four_model_oracle_audit_colab.sh를 실행하면 돼.
+결과 summary JSON을 받으면 fusion 오답 recoverable 비율, oracle 4M+4K headroom, stage별 oracle recall, 특히 capacity_h128의 Deep rescue를 분석하고 dynamic gate/Deep gate/new architecture 중 다음 방향을 정해 이 current_progress_summary.md를 갱신해줘.
 ```
