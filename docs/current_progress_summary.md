@@ -18,7 +18,7 @@
 
 ```text
 4-model stage-split flexible fusion
-classwise4_w_p0.76_c0.04_l0.00_li_p0.79_c0.02_l0.15_d_p0.79_c0.00_l0.16_rem_p0.00_c0.42_l0.12
+classwise4_w_p0.75_c0.06_l0.00_li_p0.80_c0.02_l0.13_d_p0.80_c0.00_l0.18_rem_p0.00_c0.44_l0.11
 ```
 
 사용 모델:
@@ -34,23 +34,23 @@ classwise4_w_p0.76_c0.04_l0.00_li_p0.79_c0.02_l0.15_d_p0.79_c0.00_l0.16_rem_p0.0
 
 ```text
 Wake:
-  original 0.20 / full_w20 0.76 / capacity_h128 0.04 / h128_ls003 0.00
+  original 0.19 / full_w20 0.75 / capacity_h128 0.06 / h128_ls003 0.00
 
 Light(N1/N2):
-  original 0.04 / full_w20 0.79 / capacity_h128 0.02 / h128_ls003 0.15
+  original 0.05 / full_w20 0.80 / capacity_h128 0.02 / h128_ls003 0.13
 
 Deep(N3):
-  original 0.05 / full_w20 0.79 / capacity_h128 0.00 / h128_ls003 0.16
+  original 0.02 / full_w20 0.80 / capacity_h128 0.00 / h128_ls003 0.18
 
 REM:
-  original 0.46 / full_w20 0.00 / capacity_h128 0.42 / h128_ls003 0.12
+  original 0.45 / full_w20 0.00 / capacity_h128 0.44 / h128_ls003 0.11
 ```
 
 3-seed 평균:
 
 ```text
-4M 0.4145 / 4K 0.2576
-Wake 0.5089 / Light 0.6418 / Deep 0.1249 / REM 0.3825
+4M 0.4149 / 4K 0.2575
+Wake 0.5089 / Light 0.6415 / Deep 0.1268 / REM 0.3825
 ```
 
 ## 이전 기준 대비 향상
@@ -66,12 +66,12 @@ Wake 0.5034 / Light 0.6321 / Deep 0.1220 / REM 0.3722
 현재 best 대비:
 
 ```text
-4 Macro +0.0071 (+1.75%)
-4 Kappa +0.0118 (+4.78%)
+4 Macro +0.0075 (+1.85%)
+4 Kappa +0.0117 (+4.75%)
 Wake    +0.0055 (+1.09%)
-Light   +0.0097 (+1.53%)
-Deep    +0.0029 (+2.35%)
-REM     +0.0103 (+2.77%)
+Light   +0.0094 (+1.49%)
+Deep    +0.0048 (+3.94%)
+REM     +0.0103 (+2.76%)
 ```
 
 ## 최근 실험 흐름
@@ -137,6 +137,11 @@ REM     +0.0103 (+2.77%)
     round2 pure top과 current best 사이 동시 탐색
     현재 best 도출
     4M 0.4145 / 4K 0.2576
+
+14. 4-model flex4 kappa refine round4
+    round3 pure top과 current best 사이 동시 탐색
+    현재 best 도출
+    4M 0.4149 / 4K 0.2575
 ```
 
 flex4_refine에서 pure 4M+4K top은 아래 후보였다.
@@ -385,6 +390,35 @@ Deep +0.0007 (+0.5767%)
 REM +0.0004 (+0.1024%)
 ```
 
+flex4_kappa_refine_round4 결과 pure 4M+4K top과 best_by_4K는 같은 후보였다.
+
+```text
+classwise4_w_p0.75_c0.06_l0.00_li_p0.80_c0.02_l0.13_d_p0.80_c0.00_l0.18_rem_p0.00_c0.44_l0.12
+4M 0.4150 / 4K 0.2577 / Wake 0.5089 / Light 0.6421 / Deep 0.1268 / REM 0.3823
+4M+4K 0.6728 / Wake+REM 0.8912
+```
+
+선택 기준상 채택한 새 current best는 pure top 대비 4M+4K가 0.0003 낮아 tie band 안에 있고, Wake+REM이 더 높다. 이전 current best는 새 pure top 대비 4M+4K가 0.0007 낮아 tie band 밖으로 밀렸으므로 새 best를 채택한다.
+
+```text
+classwise4_w_p0.75_c0.06_l0.00_li_p0.80_c0.02_l0.13_d_p0.80_c0.00_l0.18_rem_p0.00_c0.44_l0.11
+4M 0.4149 / 4K 0.2575 / Wake 0.5089 / Light 0.6415 / Deep 0.1268 / REM 0.3825
+4M+4K 0.6724 / Wake+REM 0.8914
+```
+
+이전 current best 대비:
+
+```text
+4M+4K +0.0004 (+0.0539%)
+Wake+REM +0.0000 (+0.0003%)
+4 Macro +0.0004 (+0.1038%)
+4 Kappa -0.0001 (-0.0265%)
+Wake +0.0000 (+0.0049%)
+Light -0.0002 (-0.0339%)
+Deep +0.0019 (+1.5505%)
+REM -0.0000 (-0.0057%)
+```
+
 ## 현재 코드 상태
 
 최근 추가된 핵심 스크립트:
@@ -401,6 +435,7 @@ scripts/run_four_model_flex4_kappa_refinement_colab.sh
 scripts/run_four_model_flex4_kappa_refinement_round2_colab.sh
 scripts/run_four_model_flex4_kappa_refinement_round3_colab.sh
 scripts/run_four_model_flex4_kappa_refinement_round4_colab.sh
+scripts/run_four_model_flex4_kappa_refinement_round5_colab.sh
 ```
 
 기능:
@@ -627,39 +662,11 @@ Colab 실행:
 /Users/chan/Downloads/fusion4_original_full_w20_capacity_h128_ls003_context20_h64_flex4_kappa_refine_round3_summary.json
 ```
 
-## 다음 실험
-
-우선순위 1:
+완료:
 
 ```text
 flex4_kappa_refine_round3의 pure top과 새 current best 사이를 같이 덮는 flex4_kappa_refine_round4
 ```
-
-권장 grid:
-
-```text
-Wake:
-  full_w20 0.75,0.76,0.77
-  capacity_h128 0.04,0.06
-  h128_ls003 0
-
-Light(N1/N2):
-  full_w20 0.79,0.80
-  capacity_h128 0.02,0.04
-  h128_ls003 0.13,0.15
-
-Deep(N3):
-  full_w20 0.77,0.79,0.80
-  capacity_h128 0
-  h128_ls003 0.16,0.18
-
-REM:
-  full_w20 0
-  capacity_h128 0.42,0.44,0.46
-  h128_ls003 0.11,0.12
-```
-
-후보 수를 약 1.7k로 제한해서 summary JSON이 너무 커지지 않도록 한다.
 
 Colab 실행:
 
@@ -669,6 +676,54 @@ Colab 실행:
 !bash scripts/run_four_model_flex4_kappa_refinement_round4_colab.sh
 ```
 
+결과 summary JSON:
+
+```text
+/Users/chan/Downloads/fusion4_original_full_w20_capacity_h128_ls003_context20_h64_flex4_kappa_refine_round4_summary.json
+```
+
+## 다음 실험
+
+우선순위 1:
+
+```text
+flex4_kappa_refine_round4의 pure top과 새 current best 주변 edge 축을 확장하는 flex4_kappa_refine_round5
+```
+
+권장 grid:
+
+```text
+Wake:
+  full_w20 0.74,0.75,0.76
+  capacity_h128 0.06,0.08
+  h128_ls003 0
+
+Light(N1/N2):
+  full_w20 0.80,0.81
+  capacity_h128 0.02,0.04
+  h128_ls003 0.11,0.13
+
+Deep(N3):
+  full_w20 0.80,0.81
+  capacity_h128 0
+  h128_ls003 0.18,0.20
+
+REM:
+  full_w20 0
+  capacity_h128 0.42,0.44
+  h128_ls003 0.10,0.11,0.12
+```
+
+후보 수를 약 1.2k로 제한해서 summary JSON이 너무 커지지 않도록 한다.
+
+Colab 실행:
+
+```bash
+%cd /content/SSE
+!git pull
+!bash scripts/run_four_model_flex4_kappa_refinement_round5_colab.sh
+```
+
 비교 포인트:
 
 ```text
@@ -676,7 +731,7 @@ Colab 실행:
 2. best_by_4K의 4M+4K가 current best와 얼마나 차이 나는지
 3. 새 best가 나오면 이전 current best 대비 절대 변화와 % 변화를 같이 기록
 4. 기존 선택 기준상 overall best도 갱신되는지
-5. Kappa top 후보가 Deep 0.125 근방을 유지하면서 REM 손실을 줄이는지
+5. Deep 0.126대 회복을 유지하면서 4K/REM 손실을 줄이는지
 ```
 
 ## 다음 채팅방 시작 프롬프트
@@ -685,9 +740,9 @@ Colab 실행:
 docs/current_progress_summary.md를 읽고 이어서 진행해줘.
 현재 목표는 비용 무시, 성능-only fixed/flexible fusion 개선이야.
 현재 best는 4-model stage-split flexible fusion:
-classwise4_w_p0.76_c0.04_l0.00_li_p0.79_c0.02_l0.15_d_p0.79_c0.00_l0.16_rem_p0.00_c0.42_l0.12
-3-seed 평균은 4M 0.4145 / 4K 0.2576 / Wake 0.5089 / Light 0.6418 / Deep 0.1249 / REM 0.3825.
-다음 실험은 flex4_kappa_refine_round3의 pure top과 새 current best 사이를 같이 덮는 flex4_kappa_refine_round4야.
-Colab에서는 git pull 후 scripts/run_four_model_flex4_kappa_refinement_round4_colab.sh를 실행하면 돼.
+classwise4_w_p0.75_c0.06_l0.00_li_p0.80_c0.02_l0.13_d_p0.80_c0.00_l0.18_rem_p0.00_c0.44_l0.11
+3-seed 평균은 4M 0.4149 / 4K 0.2575 / Wake 0.5089 / Light 0.6415 / Deep 0.1268 / REM 0.3825.
+다음 실험은 flex4_kappa_refine_round4의 pure top과 새 current best 주변 edge 축을 확장하는 flex4_kappa_refine_round5야.
+Colab에서는 git pull 후 scripts/run_four_model_flex4_kappa_refinement_round5_colab.sh를 실행하면 돼.
 결과 summary JSON을 받으면 best_by_4K와 기존 선택 기준 overall best를 둘 다 current best 대비 비교하고 이 current_progress_summary.md를 갱신해줘.
 ```
