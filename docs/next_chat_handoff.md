@@ -9,21 +9,21 @@ docs/current_progress_summary.md를 읽고 이어서 진행해줘.
 현재 목표는 비용, 모델 수, 추론량을 무시하고 성능-only 기준으로 DreamT sleep stage estimation fixed/flexible fusion 성능을 개선하는 거야.
 
 현재 best는 4-model stage-split flexible fusion:
-classwise4_w_p0.74_c0.06_l0.00_li_p0.80_c0.02_l0.13_d_p0.81_c0.00_l0.18_rem_p0.00_c0.44_l0.12
+classwise4_w_p0.73_c0.06_l0.00_li_p0.80_c0.02_l0.15_d_p0.82_c0.00_l0.18_rem_p0.00_c0.42_l0.13
 
 3-seed 평균:
-4M 0.4150 / 4K 0.2578 / Wake 0.5095 / Light 0.6419 / Deep 0.1266 / REM 0.3821
+4M 0.4152 / 4K 0.2580 / Wake 0.5098 / Light 0.6414 / Deep 0.1274 / REM 0.3824
 
 선택 기준:
 3-seed 평균에서 4M+4K가 가장 높은 후보를 best로 둔다.
 단, 4M+4K 차이가 0.0005 이하이면 Wake+REM이 더 높은 후보를 우선한다.
 
-다음 실험은 flex4_kappa_refine_round5의 4K ridge와 새 current best 주변을 확장하는 flex4_kappa_refine_round6부터 진행해줘.
+다음 실험은 flex4_kappa_refine_round6의 4K 0.2580 돌파 ridge를 확장하는 flex4_kappa_refine_round7부터 진행해줘.
 
 Colab 실행:
 %cd /content/SSE
 !git pull
-!bash scripts/run_four_model_flex4_kappa_refinement_round6_colab.sh
+!bash scripts/run_four_model_flex4_kappa_refinement_round7_colab.sh
 
 결과 summary JSON을 받으면 best_by_4K와 기존 선택 기준 overall best를 둘 다 current best 대비 비교하고,
 새 best 채택 여부와 구 best 대비 % 상승률을 판단한 뒤 docs/current_progress_summary.md를 갱신해줘.
