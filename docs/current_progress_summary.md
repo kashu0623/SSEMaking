@@ -295,6 +295,7 @@ scripts/run_four_model_flex4_stage_refinement_round4_colab.sh
 scripts/run_four_model_flex4_stage_refinement_round5_colab.sh
 scripts/run_four_model_flex4_stage_refinement_round6_colab.sh
 scripts/run_four_model_flex4_stage_refinement_round7_colab.sh
+scripts/run_four_model_flex4_kappa_refinement_colab.sh
 ```
 
 기능:
@@ -466,31 +467,31 @@ Colab 실행:
 우선순위 1:
 
 ```text
-round6 best의 Wake+REM 우세 후보와 pure top 후보를 같이 덮는 flex4_stage_refine_round7
+Kappa를 직접 겨냥해서 4K 0.2575~0.2580 근방을 노리는 flex4_kappa_refine
 ```
 
 권장 grid:
 
 ```text
 Wake:
-  full_w20 0.78,0.79
-  capacity_h128 0.02,0.04,0.06
+  full_w20 0.77,0.78
+  capacity_h128 0.01,0.02,0.03,0.04
   h128_ls003 0
 
 Light(N1/N2):
-  full_w20 0.78,0.79
-  capacity_h128 0.02,0.04
+  full_w20 0.78,0.79,0.80
+  capacity_h128 0.02,0.03,0.04
   h128_ls003 0.13,0.15,0.17
 
 Deep(N3):
-  full_w20 0.74,0.75,0.76,0.77
+  full_w20 0.75,0.76,0.77,0.78
   capacity_h128 0,0.01,0.02
-  h128_ls003 0.18,0.20,0.22
+  h128_ls003 0.14,0.16,0.18,0.20
 
 REM:
   full_w20 0
-  capacity_h128 0.42,0.44
-  h128_ls003 0.12,0.13
+  capacity_h128 0.42,0.44,0.46
+  h128_ls003 0.11,0.12,0.13
 ```
 
 Colab 실행:
@@ -498,17 +499,17 @@ Colab 실행:
 ```bash
 %cd /content/SSE
 !git pull
-!bash scripts/run_four_model_flex4_stage_refinement_round7_colab.sh
+!bash scripts/run_four_model_flex4_kappa_refinement_colab.sh
 ```
 
 비교 포인트:
 
 ```text
-1. 현재 stage-split best 대비 4M+4K 변화
-2. tie band 안에서는 Wake+REM 변화
-3. REM 0.3828+를 유지하면서 Wake를 0.5085 이상으로 회복할 수 있는지
-4. pure top 쪽 Light 0.642와 Deep 0.125+ 회복이 tie band 안에 남는지
-5. 4M+4K 개선이 0.0005를 넘는 새 후보가 나오는지
+1. best_by_4K가 0.2575~0.2580에 도달하는지
+2. best_by_4K의 4M+4K가 current best와 얼마나 차이 나는지
+3. current best 대비 Wake+REM, Light/Deep/REM 변화
+4. 기존 선택 기준상 overall best도 갱신되는지
+5. Kappa top 후보가 Deep 0.125 근방을 회복하는지
 ```
 
 ## 다음 채팅방 시작 프롬프트
@@ -519,7 +520,7 @@ docs/current_progress_summary.md를 읽고 이어서 진행해줘.
 현재 best는 4-model stage-split flexible fusion:
 classwise4_w_p0.78_c0.04_l0.00_li_p0.79_c0.02_l0.15_d_p0.75_c0.01_l0.20_rem_p0.00_c0.42_l0.12
 3-seed 평균은 4M 0.4143 / 4K 0.2571 / Wake 0.5084 / Light 0.6414 / Deep 0.1243 / REM 0.3829.
-다음 실험은 round6 best의 Wake+REM 우세 후보와 pure top 후보를 같이 덮는 flex4_stage_refine_round7야.
-Colab에서는 git pull 후 scripts/run_four_model_flex4_stage_refinement_round7_colab.sh를 실행하면 돼.
-결과 summary JSON을 받으면 current best 대비 4M+4K, Wake+REM, Light/Deep/REM 변화를 비교하고 이 current_progress_summary.md를 갱신해줘.
+다음 실험은 Kappa를 직접 겨냥해서 4K 0.2575~0.2580 근방을 노리는 flex4_kappa_refine이야.
+Colab에서는 git pull 후 scripts/run_four_model_flex4_kappa_refinement_colab.sh를 실행하면 돼.
+결과 summary JSON을 받으면 best_by_4K와 기존 선택 기준 overall best를 둘 다 current best 대비 비교하고 이 current_progress_summary.md를 갱신해줘.
 ```

@@ -18,13 +18,13 @@ classwise4_w_p0.78_c0.04_l0.00_li_p0.79_c0.02_l0.15_d_p0.75_c0.01_l0.20_rem_p0.0
 3-seed 평균에서 4M+4K가 가장 높은 후보를 best로 둔다.
 단, 4M+4K 차이가 0.0005 이하이면 Wake+REM이 더 높은 후보를 우선한다.
 
-다음 실험은 round6 best의 Wake+REM 우세 후보와 pure top 후보를 같이 덮는 flex4_stage_refine_round7부터 진행해줘.
+다음 실험은 Kappa를 직접 겨냥해서 4K 0.2575~0.2580 근방을 노리는 flex4_kappa_refine부터 진행해줘.
 
 Colab 실행:
 %cd /content/SSE
 !git pull
-!bash scripts/run_four_model_flex4_stage_refinement_round7_colab.sh
+!bash scripts/run_four_model_flex4_kappa_refinement_colab.sh
 
-결과 summary JSON을 받으면 current best 대비 4M+4K, Wake+REM, Light/Deep/REM 변화를 비교하고,
+결과 summary JSON을 받으면 best_by_4K와 기존 선택 기준 overall best를 둘 다 current best 대비 비교하고,
 새 best 채택 여부를 판단한 뒤 docs/current_progress_summary.md를 갱신해줘.
 ```
