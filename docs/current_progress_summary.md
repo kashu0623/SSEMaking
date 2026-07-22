@@ -122,6 +122,11 @@ REM     +0.0107 (+2.87%)
     round5 best와 pure top 사이 동시 탐색
     현재 best 도출
     4M 0.4143 / 4K 0.2571
+
+11. 4-model flex4 kappa refine
+    4K 0.2575~0.2580 근방을 직접 겨냥한 compact grid
+    current best 유지
+    best_by_4K 4M 0.4144 / 4K 0.2574
 ```
 
 flex4_refine에서 pure 4M+4K top은 아래 후보였다.
@@ -283,6 +288,39 @@ Wake+REM +0.0005
 Wake -0.0002 / Light +0.0000 / Deep -0.0001 / REM +0.0007
 ```
 
+flex4_kappa_refine 결과 pure 4M+4K top은 아래 후보였다.
+
+```text
+classwise4_w_p0.77_c0.04_l0.00_li_p0.78_c0.04_l0.17_d_p0.77_c0.00_l0.16_rem_p0.00_c0.42_l0.12
+4M 0.4144 / 4K 0.2574 / Wake 0.5087 / Light 0.6420 / Deep 0.1253 / REM 0.3818
+4M+4K 0.6718 / Wake+REM 0.8905
+```
+
+best_by_4K는 아래 후보였다.
+
+```text
+classwise4_w_p0.77_c0.02_l0.00_li_p0.79_c0.02_l0.17_d_p0.77_c0.00_l0.16_rem_p0.00_c0.44_l0.12
+4M 0.4144 / 4K 0.2574 / Wake 0.5084 / Light 0.6422 / Deep 0.1249 / REM 0.3819
+4M+4K 0.6718 / Wake+REM 0.8903
+```
+
+기존 선택 기준을 적용하면 현재 best가 pure top 대비 4M+4K가 0.0005 낮아 tie band 안에 있고, Wake+REM이 더 높아서 계속 우선된다.
+
+```text
+classwise4_w_p0.78_c0.04_l0.00_li_p0.79_c0.02_l0.15_d_p0.75_c0.01_l0.20_rem_p0.00_c0.42_l0.12
+4M 0.4143 / 4K 0.2571 / Wake 0.5084 / Light 0.6414 / Deep 0.1243 / REM 0.3829
+4M+4K 0.6714 / Wake+REM 0.8913
+```
+
+current best 대비 best_by_4K 변화:
+
+```text
+4M+4K +0.0004
+Wake+REM -0.0010
+4 Macro +0.0001 / 4 Kappa +0.0003
+Wake -0.0001 / Light +0.0008 / Deep +0.0006 / REM -0.0010
+```
+
 ## 현재 코드 상태
 
 최근 추가된 핵심 스크립트:
@@ -296,6 +334,7 @@ scripts/run_four_model_flex4_stage_refinement_round5_colab.sh
 scripts/run_four_model_flex4_stage_refinement_round6_colab.sh
 scripts/run_four_model_flex4_stage_refinement_round7_colab.sh
 scripts/run_four_model_flex4_kappa_refinement_colab.sh
+scripts/run_four_model_flex4_kappa_refinement_round2_colab.sh
 ```
 
 기능:
@@ -462,39 +501,11 @@ Colab 실행:
 /Users/chan/Downloads/fusion4_original_full_w20_capacity_h128_ls003_context20_h64_flex4_stage_refine_round6_summary.json
 ```
 
-## 다음 실험
-
-우선순위 1:
+완료:
 
 ```text
 Kappa를 직접 겨냥해서 4K 0.2575~0.2580 근방을 노리는 flex4_kappa_refine
 ```
-
-권장 grid:
-
-```text
-Wake:
-  full_w20 0.77,0.78
-  capacity_h128 0.02,0.04
-  h128_ls003 0
-
-Light(N1/N2):
-  full_w20 0.78,0.79
-  capacity_h128 0.02,0.04
-  h128_ls003 0.15,0.17
-
-Deep(N3):
-  full_w20 0.75,0.76,0.77
-  capacity_h128 0,0.01
-  h128_ls003 0.16,0.18,0.20
-
-REM:
-  full_w20 0
-  capacity_h128 0.42,0.44,0.46
-  h128_ls003 0.11,0.12
-```
-
-후보 수를 약 3.5k로 제한해서 summary JSON이 너무 커지지 않도록 한다.
 
 Colab 실행:
 
@@ -502,6 +513,54 @@ Colab 실행:
 %cd /content/SSE
 !git pull
 !bash scripts/run_four_model_flex4_kappa_refinement_colab.sh
+```
+
+결과 summary JSON:
+
+```text
+/Users/chan/Downloads/fusion4_original_full_w20_capacity_h128_ls003_context20_h64_flex4_kappa_refine_summary.json
+```
+
+## 다음 실험
+
+우선순위 1:
+
+```text
+flex4_kappa_refine best_by_4K 주변의 edge 축을 확장하는 flex4_kappa_refine_round2
+```
+
+권장 grid:
+
+```text
+Wake:
+  full_w20 0.76,0.77
+  capacity_h128 0,0.02,0.04
+  h128_ls003 0
+
+Light(N1/N2):
+  full_w20 0.79,0.80
+  capacity_h128 0,0.02
+  h128_ls003 0.17,0.19
+
+Deep(N3):
+  full_w20 0.77,0.78
+  capacity_h128 0
+  h128_ls003 0.14,0.16
+
+REM:
+  full_w20 0
+  capacity_h128 0.42,0.44,0.46
+  h128_ls003 0.12,0.13
+```
+
+후보 수를 약 1.2k로 제한해서 summary JSON이 너무 커지지 않도록 한다.
+
+Colab 실행:
+
+```bash
+%cd /content/SSE
+!git pull
+!bash scripts/run_four_model_flex4_kappa_refinement_round2_colab.sh
 ```
 
 비교 포인트:
@@ -522,7 +581,7 @@ docs/current_progress_summary.md를 읽고 이어서 진행해줘.
 현재 best는 4-model stage-split flexible fusion:
 classwise4_w_p0.78_c0.04_l0.00_li_p0.79_c0.02_l0.15_d_p0.75_c0.01_l0.20_rem_p0.00_c0.42_l0.12
 3-seed 평균은 4M 0.4143 / 4K 0.2571 / Wake 0.5084 / Light 0.6414 / Deep 0.1243 / REM 0.3829.
-다음 실험은 Kappa를 직접 겨냥해서 4K 0.2575~0.2580 근방을 노리는 flex4_kappa_refine이야.
-Colab에서는 git pull 후 scripts/run_four_model_flex4_kappa_refinement_colab.sh를 실행하면 돼.
+다음 실험은 flex4_kappa_refine best_by_4K 주변의 edge 축을 확장하는 flex4_kappa_refine_round2야.
+Colab에서는 git pull 후 scripts/run_four_model_flex4_kappa_refinement_round2_colab.sh를 실행하면 돼.
 결과 summary JSON을 받으면 best_by_4K와 기존 선택 기준 overall best를 둘 다 current best 대비 비교하고 이 current_progress_summary.md를 갱신해줘.
 ```
