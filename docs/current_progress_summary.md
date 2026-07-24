@@ -161,6 +161,10 @@ REM     +0.0103 (+2.77%)
 18. 4-model oracle audit
     current best의 오답 중 기존 model pool이 복구 가능한 비율 측정
     dynamic gating으로 방향 전환 결정
+
+19. validation-trained static/causal temporal gate
+    oracle headroom의 일반화 가능성 검증
+    test에서 큰 하락으로 탈락, same-split init ensemble으로 방향 전환
 ```
 
 flex4_refine에서 pure 4M+4K top은 아래 후보였다.
@@ -564,6 +568,24 @@ h128_ls003 18.34%, full_w20 10.41%다. Deep rescue 총량은 h128_ls003 114, cap
 original temporal 77, full_w20 21이다. 따라서 Deep-only 보정보다 4 model 전체를 sample별로 선택하는
 gate가 우선이며, causal history가 추가 이득을 주는지 다음 실험에서 static gate와 직접 비교한다.
 
+validation-trained gate 결과는 oracle 상보성이 validation-only direct gate의 일반화로 이어지지 않음을 보였다.
+current best는 유지한다.
+
+```text
+test 3-seed:
+current best fusion  4M 0.4153 / 4K 0.2581 / 4M+4K 0.6734
+gate_static          4M 0.3345 / 4K 0.2093 / 4M+4K 0.5438
+gate_causal          4M 0.3386 / 4K 0.1624 / 4M+4K 0.5010
+
+gate_static vs current: -0.1296 (-19.25%)
+gate_causal vs current: -0.1724 (-25.60%)
+```
+
+세 outer seed 모두에서 두 gate가 current best보다 낮았다. static gate의 Deep/REM은 0.0021/0.1416,
+causal gate의 Deep/REM은 0.0812/0.2067로 크게 붕괴했다. 반면 full validation refit score는 높아
+validation subject로만 학습한 direct class reclassifier가 test subject 분포에 과적합한 것으로 판단한다.
+따라서 이 gate 계열은 중단하며, OOF stacked gate는 별도 대규모 cross-fitting 실험으로 미룬다.
+
 ## 현재 코드 상태
 
 최근 추가된 핵심 스크립트:
@@ -586,6 +608,7 @@ scripts/run_four_model_flex4_kappa_refinement_round7_colab.sh
 scripts/run_four_model_flex4_kappa_refinement_round8_colab.sh
 scripts/run_four_model_oracle_audit_colab.sh
 scripts/run_four_model_causal_gate_colab.sh
+scripts/run_four_model_same_split_init_ensemble_colab.sh
 ```
 
 기능:
@@ -611,6 +634,7 @@ src/sse_sleep/evaluate_four_model_fusion.py
 ```text
 src/sse_sleep/evaluate_four_model_oracle_audit.py
 src/sse_sleep/evaluate_four_model_causal_gate.py
+src/sse_sleep/average_prediction_ensemble.py
 ```
 
 기능:
@@ -625,6 +649,9 @@ src/sse_sleep/evaluate_four_model_causal_gate.py
 
 causal gate는 validation labels로만 학습하며, validation subject 일부로 C/class-weight를 고른다.
 학습이 끝난 gate는 validation 전체로 다시 fit한 후 untouched test에서만 평가한다.
+
+same-split init ensemble은 기존 outer split을 바꾸지 않고, 각 role에 대해 초기화 seed만 다른 replica를
+추가 학습해 role별 probability 평균을 만든 후 current best fusion weight를 그대로 적용한다.
 
 ## 최근 완료 실험
 
@@ -917,56 +944,53 @@ Colab 실행:
 우선순위 1:
 
 ```text
-validation-trained static/causal temporal gate로 4-model prediction pool을 sample별 재결정
+four-model same-split multi-init probability ensemble
 ```
 
 목적:
 
 ```text
-oracle audit에서 fusion 오답의 42.13%가 기존 model pool만으로 복구 가능했다.
-current probability, model별 entropy/margin, vote count로 static gate를 만들고,
-여기에 과거 1/3/5/10 epoch fusion probability, 직전 stage, 직전 stage duration만 추가한
-causal temporal gate를 비교한다. 미래 epoch와 test label은 사용하지 않는다.
+validation-trained static/causal gate는 test 3-seed에서 각각 0.5438/0.5010으로 current best 0.6734보다
+크게 낮았다. 새 direct reclassifier 대신, 동일 outer subject split에서 초기화만 다른 model replica를
+role별로 평균해 prediction variance와 calibration noise를 줄인다.
 ```
 
-각 outer seed에서 validation subject 25%를 inner holdout으로 두고 regularization/class weighting을 고른다.
-선택된 설정은 validation 전체로 refit해 test에 한 번 평가한다.
+기존 checkpoint 1개와 새 initialization 5개를 role별로 평균한다. outer seed 42/7/123의 test set은 그대로
+유지하므로 기존 current best와 같은 3-seed 기준으로 직접 비교할 수 있다. 가중치 grid는 다시 탐색하지 않고
+current best weight를 고정한다.
 
 Colab 실행:
 
 ```bash
 %cd /content/SSE
 !git pull
-!bash scripts/run_four_model_causal_gate_colab.sh
+!bash scripts/run_four_model_same_split_init_ensemble_colab.sh
 ```
 
 결과 summary JSON:
 
 ```text
-/content/drive/MyDrive/SSE_outputs/fusion4_current_best_causal_gate_context20_h64_summary.json
+/content/drive/MyDrive/SSE_outputs/fusion4_same_split_init_ensemble_context20_h64_summary.json
 ```
 
 비교 포인트:
 
 ```text
-1. `gate_static`, `gate_causal` 각각의 test 3-seed 4M+4K와 current best 차이
-2. static 대비 causal history의 추가 4M+4K 이득
-3. Wake/Light/Deep/REM 변화, 특히 Deep/REM이 동반 개선되는지
-4. inner holdout score와 test 성능의 일관성
+1. role별 raw ensemble과 final fusion의 3-seed 4M+4K
+2. current best 대비 4M+4K 절대/상대 변화율
+3. Wake/Light/Deep/REM 변화와 Deep F1 회복 여부
+4. 6-member role ensemble이 초기화 variance를 얼마나 줄이는지
 5. 기존 선택 기준(4M+4K tie band 0.0005, Wake+REM 우선)상 새 best 채택 여부
 ```
 
 결과에 따른 다음 분기:
 
 ```text
-causal gate가 current best를 유의미하게 넘음:
-  same-split multi-init ensemble을 추가한 gate와 compact GRU gate를 확장한다.
+same-split ensemble이 current best를 넘음:
+  ensemble probability에 대한 compact grid refinement와 OOF stacked gate를 검토한다.
 
-static gate만 개선:
-  causal history 대신 confidence/disagreement feature를 더 정교화한다.
-
-둘 다 current best를 못 넘음:
-  same-split multi-init ensemble 또는 오류 성격이 다른 multi-scale TCN/Transformer를 추가한다.
+same-split ensemble이 current best를 못 넘음:
+  오류 성격이 다른 multi-scale TCN/Transformer 또는 raw-signal branch를 새 role로 추가한다.
 ```
 
 보조 실험으로 `scripts/run_four_model_flex4_kappa_refinement_round8_colab.sh`도 준비되어 있지만,
@@ -980,7 +1004,7 @@ docs/current_progress_summary.md를 읽고 이어서 진행해줘.
 현재 best는 4-model stage-split flexible fusion:
 classwise4_w_p0.72_c0.06_l0.00_li_p0.80_c0.02_l0.15_d_p0.82_c0.00_l0.18_rem_p0.00_c0.42_l0.13
 3-seed 평균은 4M 0.4153 / 4K 0.2581 / Wake 0.5099 / Light 0.6414 / Deep 0.1274 / REM 0.3825.
-oracle audit은 완료됐고, 다음 실험은 validation-trained static/causal temporal gate야.
-Colab에서는 git pull 후 scripts/run_four_model_causal_gate_colab.sh를 실행하면 돼.
-결과 summary JSON을 받으면 gate_static/gate_causal을 current best 대비 4M+4K, Wake+REM, Deep/REM으로 비교하고 새 best 채택 여부를 판단해 이 current_progress_summary.md를 갱신해줘.
+oracle audit과 validation-trained gate는 완료됐다. 다음 실험은 four-model same-split multi-init ensemble이야.
+Colab에서는 git pull 후 scripts/run_four_model_same_split_init_ensemble_colab.sh를 실행하면 돼.
+결과 summary JSON을 받으면 current best 대비 4M+4K, Wake+REM, Deep/REM 변화를 비교하고 새 best 채택 여부를 판단해 이 current_progress_summary.md를 갱신해줘.
 ```

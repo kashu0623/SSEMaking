@@ -18,13 +18,13 @@ classwise4_w_p0.72_c0.06_l0.00_li_p0.80_c0.02_l0.15_d_p0.82_c0.00_l0.18_rem_p0.0
 3-seed 평균에서 4M+4K가 가장 높은 후보를 best로 둔다.
 단, 4M+4K 차이가 0.0005 이하이면 Wake+REM이 더 높은 후보를 우선한다.
 
-oracle audit은 완료됐다. 다음 실험은 validation-trained static/causal temporal gate야.
+oracle audit과 validation-trained gate는 완료됐다. 다음 실험은 four-model same-split multi-init ensemble이야.
 
 Colab 실행:
 %cd /content/SSE
 !git pull
-!bash scripts/run_four_model_causal_gate_colab.sh
+!bash scripts/run_four_model_same_split_init_ensemble_colab.sh
 
-결과 summary JSON을 받으면 gate_static/gate_causal을 current best 대비 4M+4K, Wake+REM,
-Deep/REM으로 비교하고 새 best 채택 여부를 판단한 뒤 docs/current_progress_summary.md를 갱신해줘.
+결과 summary JSON을 받으면 current best 대비 4M+4K, Wake+REM, Deep/REM 변화를 비교하고
+새 best 채택 여부를 판단한 뒤 docs/current_progress_summary.md를 갱신해줘.
 ```
