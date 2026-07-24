@@ -253,6 +253,20 @@ def evaluate_candidate(
     }
 
 
+def evaluate_direct4_baseline(seed_data: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    reports = []
+    for seed in seed_data:
+        report: dict[str, Any] = {"seed": seed["seed"]}
+        for split in ("val", "test"):
+            data = seed[split]
+            report[split] = summarize(data["y_true"], data["direct4_probs"])
+        reports.append(report)
+    return {
+        "name": "direct4_original",
+        **aggregate_reports(reports),
+    }
+
+
 def select_candidates(candidates: Sequence[dict[str, Any]], tie_band: float) -> dict[str, Any]:
     def score(candidate: dict[str, Any]) -> float:
         return float(candidate["test"]["4_macro_f1_plus_4_kappa"]["mean"])
@@ -378,6 +392,7 @@ def main() -> None:
         if all(alpha == 0.0 for alpha in candidate["direct4_alphas"].values())
         and candidate["deep_gain"] == 1.0
     )
+    direct4_baseline = evaluate_direct4_baseline(seed_data)
     report = {
         "experiment": "current_same_split_ensemble_plus_direct4_original_hybrid",
         "stage_names": list(STAGE4_NAMES),
@@ -399,6 +414,7 @@ def main() -> None:
         },
         "candidate_count": len(candidates),
         "current_baseline": current_baseline,
+        "direct4_baseline": direct4_baseline,
         "selections": selections,
         "candidates": candidates,
     }
@@ -411,6 +427,13 @@ def main() -> None:
         f"4M {baseline_test['4_macro_f1']['mean']:.4f} / "
         f"4K {baseline_test['4_kappa']['mean']:.4f} / "
         f"Deep {baseline_test['deep_f1']['mean']:.4f}"
+    )
+    direct4_test = direct4_baseline["test"]
+    print(
+        "direct4 baseline: "
+        f"4M {direct4_test['4_macro_f1']['mean']:.4f} / "
+        f"4K {direct4_test['4_kappa']['mean']:.4f} / "
+        f"Deep {direct4_test['deep_f1']['mean']:.4f}"
     )
     for key in (
         "pure_top",
