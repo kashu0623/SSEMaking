@@ -157,6 +157,10 @@ REM     +0.0103 (+2.77%)
     4K 0.2580 돌파 ridge 확장
     현재 best 도출
     4M 0.4153 / 4K 0.2581
+
+18. 4-model oracle audit
+    current best의 오답 중 기존 model pool이 복구 가능한 비율 측정
+    dynamic gating으로 방향 전환 결정
 ```
 
 flex4_refine에서 pure 4M+4K top은 아래 후보였다.
@@ -529,6 +533,37 @@ Deep +0.0000 (+0.0000%)
 REM +0.0001 (+0.0261%)
 ```
 
+four_model_oracle_audit 결과는 fixed weight 재탐색보다 dynamic gate를 우선해야 한다는 근거를 제공했다.
+oracle은 정답을 알고 있을 때만 가능한 상한이므로 성능 후보가 아니며, 기존 모델 pool의 상보성을 측정하는 진단값이다.
+
+```text
+test 3-seed current fusion:
+4M 0.4153 / 4K 0.2581 / 4M+4K 0.6734
+
+test 3-seed oracle (4 base model + current fusion):
+4M 0.5998 / 4K 0.5391 / 4M+4K 1.1389
+oracle headroom: +0.4655
+
+fusion 오답 중 any-model recoverable: 42.13% +/- 0.25%p
+model disagreement rate: 51.99%
+agreement 구간 fusion accuracy: 63.62%
+disagreement 구간 fusion accuracy: 46.01%
+```
+
+stage별 test recall oracle headroom:
+
+```text
+Wake  0.4927 -> 0.6131 (+0.1204)
+Light 0.5976 -> 0.8249 (+0.2273)
+Deep  0.1479 -> 0.2550 (+0.1071)
+REM   0.5517 -> 0.7455 (+0.1938)
+```
+
+모델별 fusion 오답 rescue 비율은 original temporal 19.75%, capacity_h128 19.35%,
+h128_ls003 18.34%, full_w20 10.41%다. Deep rescue 총량은 h128_ls003 114, capacity_h128 88,
+original temporal 77, full_w20 21이다. 따라서 Deep-only 보정보다 4 model 전체를 sample별로 선택하는
+gate가 우선이며, causal history가 추가 이득을 주는지 다음 실험에서 static gate와 직접 비교한다.
+
 ## 현재 코드 상태
 
 최근 추가된 핵심 스크립트:
@@ -550,6 +585,7 @@ scripts/run_four_model_flex4_kappa_refinement_round6_colab.sh
 scripts/run_four_model_flex4_kappa_refinement_round7_colab.sh
 scripts/run_four_model_flex4_kappa_refinement_round8_colab.sh
 scripts/run_four_model_oracle_audit_colab.sh
+scripts/run_four_model_causal_gate_colab.sh
 ```
 
 기능:
@@ -574,6 +610,7 @@ src/sse_sleep/evaluate_four_model_fusion.py
 
 ```text
 src/sse_sleep/evaluate_four_model_oracle_audit.py
+src/sse_sleep/evaluate_four_model_causal_gate.py
 ```
 
 기능:
@@ -585,6 +622,9 @@ src/sse_sleep/evaluate_four_model_oracle_audit.py
 4. 모델 쌍별 prediction disagreement, joint error, error Jaccard
 5. val/test 3-seed 평균을 하나의 작은 summary JSON으로 출력
 ```
+
+causal gate는 validation labels로만 학습하며, validation subject 일부로 C/class-weight를 고른다.
+학습이 끝난 gate는 validation 전체로 다시 fit한 후 untouched test에서만 평가한다.
 
 ## 최근 완료 실험
 
@@ -877,57 +917,56 @@ Colab 실행:
 우선순위 1:
 
 ```text
-현재 4-model pool의 dynamic gating headroom을 재는 four_model_oracle_audit
+validation-trained static/causal temporal gate로 4-model prediction pool을 sample별 재결정
 ```
 
 목적:
 
 ```text
-고정 classwise weight refinement가 포화된 상태에서
-sample별 dynamic gate가 실제로 복구할 수 있는 fusion 오답의 상한을 확인한다.
-
-특히 capacity_h128 단일 모델의 Deep F1은 0.1524로 current fusion Deep 0.1274보다 높으므로,
-capacity가 맞는 Deep epoch만 선택적으로 사용할 수 있는지 확인한다.
+oracle audit에서 fusion 오답의 42.13%가 기존 model pool만으로 복구 가능했다.
+current probability, model별 entropy/margin, vote count로 static gate를 만들고,
+여기에 과거 1/3/5/10 epoch fusion probability, 직전 stage, 직전 stage duration만 추가한
+causal temporal gate를 비교한다. 미래 epoch와 test label은 사용하지 않는다.
 ```
 
-학습이나 grid search 없이 기존 prediction NPZ만 읽으며, 후보 전체를 저장하지 않아 summary JSON은 작다.
+각 outer seed에서 validation subject 25%를 inner holdout으로 두고 regularization/class weighting을 고른다.
+선택된 설정은 validation 전체로 refit해 test에 한 번 평가한다.
 
 Colab 실행:
 
 ```bash
 %cd /content/SSE
 !git pull
-!bash scripts/run_four_model_oracle_audit_colab.sh
+!bash scripts/run_four_model_causal_gate_colab.sh
 ```
 
 결과 summary JSON:
 
 ```text
-/content/drive/MyDrive/SSE_outputs/fusion4_current_best_oracle_audit_context20_h64_summary.json
+/content/drive/MyDrive/SSE_outputs/fusion4_current_best_causal_gate_context20_h64_summary.json
 ```
 
 비교 포인트:
 
 ```text
-1. test 3-seed fusion 오답 중 any-model recoverable 비율
-2. oracle 4M+4K와 current best 4M+4K의 차이
-3. Deep fusion recall -> oracle recall headroom
-4. capacity_h128의 Deep rescue 수와 exclusive rescue 비율
-5. 모델 disagreement 구간에서 current fusion accuracy가 얼마나 낮아지는지
-6. pairwise joint error/error Jaccard가 낮은 모델 조합
+1. `gate_static`, `gate_causal` 각각의 test 3-seed 4M+4K와 current best 차이
+2. static 대비 causal history의 추가 4M+4K 이득
+3. Wake/Light/Deep/REM 변화, 특히 Deep/REM이 동반 개선되는지
+4. inner holdout score와 test 성능의 일관성
+5. 기존 선택 기준(4M+4K tie band 0.0005, Wake+REM 우선)상 새 best 채택 여부
 ```
 
 결과에 따른 다음 분기:
 
 ```text
-oracle headroom이 충분함:
-  same-split multi-init ensemble 후 causal temporal dynamic gate를 학습한다.
+causal gate가 current best를 유의미하게 넘음:
+  same-split multi-init ensemble을 추가한 gate와 compact GRU gate를 확장한다.
 
-전체 headroom은 작지만 Deep headroom이 큼:
-  Deep 전용 gate + duration/transition decoder를 먼저 학습한다.
+static gate만 개선:
+  causal history 대신 confidence/disagreement feature를 더 정교화한다.
 
-oracle headroom도 작음:
-  기존 LSTM weight refinement를 멈추고 오류 성격이 다른 multi-scale TCN/Transformer를 추가한다.
+둘 다 current best를 못 넘음:
+  same-split multi-init ensemble 또는 오류 성격이 다른 multi-scale TCN/Transformer를 추가한다.
 ```
 
 보조 실험으로 `scripts/run_four_model_flex4_kappa_refinement_round8_colab.sh`도 준비되어 있지만,
@@ -941,7 +980,7 @@ docs/current_progress_summary.md를 읽고 이어서 진행해줘.
 현재 best는 4-model stage-split flexible fusion:
 classwise4_w_p0.72_c0.06_l0.00_li_p0.80_c0.02_l0.15_d_p0.82_c0.00_l0.18_rem_p0.00_c0.42_l0.13
 3-seed 평균은 4M 0.4153 / 4K 0.2581 / Wake 0.5099 / Light 0.6414 / Deep 0.1274 / REM 0.3825.
-다음 실험은 current 4-model pool의 dynamic gating headroom을 재는 four_model_oracle_audit이야.
-Colab에서는 git pull 후 scripts/run_four_model_oracle_audit_colab.sh를 실행하면 돼.
-결과 summary JSON을 받으면 fusion 오답 recoverable 비율, oracle 4M+4K headroom, stage별 oracle recall, 특히 capacity_h128의 Deep rescue를 분석하고 dynamic gate/Deep gate/new architecture 중 다음 방향을 정해 이 current_progress_summary.md를 갱신해줘.
+oracle audit은 완료됐고, 다음 실험은 validation-trained static/causal temporal gate야.
+Colab에서는 git pull 후 scripts/run_four_model_causal_gate_colab.sh를 실행하면 돼.
+결과 summary JSON을 받으면 gate_static/gate_causal을 current best 대비 4M+4K, Wake+REM, Deep/REM으로 비교하고 새 best 채택 여부를 판단해 이 current_progress_summary.md를 갱신해줘.
 ```
