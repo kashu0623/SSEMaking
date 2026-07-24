@@ -150,6 +150,7 @@ def choose_source_candidates(
     candidates: Sequence[dict[str, Any]],
     selections: dict[str, Any],
     top_n: int,
+    required_names: Sequence[str],
 ) -> list[dict[str, Any]]:
     score_key = lambda item: item["test"]["4_macro_f1_plus_4_kappa"]["mean"]
     deep_key = lambda item: item["test"]["deep_f1"]["mean"]
@@ -164,6 +165,7 @@ def choose_source_candidates(
     for required_name in (
         source_name(np.zeros(4, dtype=np.float32)),
         source_name(np.ones(4, dtype=np.float32)),
+        *required_names,
     ):
         selected.append(next(item for item in candidates if item["name"] == required_name))
     unique: dict[str, dict[str, Any]] = {}
@@ -191,6 +193,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--source-deep-betas", default=None)
     parser.add_argument("--source-rem-betas", default=None)
     parser.add_argument("--source-top-n", type=int, default=4)
+    parser.add_argument("--required-source-betas", action="append", default=[])
     parser.add_argument("--wake-alphas", default=None)
     parser.add_argument("--light-alphas", default=None)
     parser.add_argument("--deep-alphas", default=None)
@@ -198,6 +201,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--deep-gains", default=None)
     parser.add_argument("--tie-band", type=float, default=0.0005)
     parser.add_argument("--archive-top", type=int, default=50)
+    parser.add_argument("--reference-source-betas", default="0,0,0,0")
+    parser.add_argument("--reference-hybrid-alphas", default="0.3125,0.34,0.85,0")
+    parser.add_argument("--reference-deep-gain", type=float, default=1.2)
     parser.add_argument("--out-json", type=Path, required=True)
     return parser.parse_args()
 
@@ -258,10 +264,23 @@ def main() -> None:
         for values in itertools.product(*source_grids)
     ]
     source_selections = select_candidates(source_candidates, args.tie_band)
+    required_source_betas = [
+        parse_float_list(text, ())
+        for text in args.required_source_betas
+    ]
+    reference_source_betas = parse_float_list(args.reference_source_betas, ())
+    required_source_betas.append(reference_source_betas)
+    if any(len(values) != len(STAGE4_NAMES) for values in required_source_betas):
+        raise ValueError("Every required/reference source beta must contain four values")
+    required_source_names = [
+        source_name(np.asarray(values, dtype=np.float32))
+        for values in required_source_betas
+    ]
     chosen_sources = choose_source_candidates(
         source_candidates,
         source_selections,
         args.source_top_n,
+        required_source_names,
     )
 
     hybrid_grids = (
@@ -307,19 +326,24 @@ def main() -> None:
             hybrid_candidates.append(candidate)
 
     hybrid_selections = select_candidates(hybrid_candidates, args.tie_band)
-    single_source_name = source_name(np.zeros(4, dtype=np.float32))
+    reference_source_name = source_name(
+        np.asarray(reference_source_betas, dtype=np.float32)
+    )
+    reference_hybrid_alphas = parse_float_list(args.reference_hybrid_alphas, ())
+    if len(reference_hybrid_alphas) != len(STAGE4_NAMES):
+        raise ValueError("Reference hybrid alpha must contain four values")
     current_best_reference = next(
         candidate
         for candidate in hybrid_candidates
-        if candidate["source"]["name"] == single_source_name
+        if candidate["source"]["name"] == reference_source_name
         and np.allclose(
             [
                 candidate["direct4_alphas"][stage]
                 for stage in STAGE4_NAMES
             ],
-            (0.3125, 0.34, 0.85, 0.0),
+            reference_hybrid_alphas,
         )
-        and np.isclose(candidate["deep_gain"], 1.2)
+        and np.isclose(candidate["deep_gain"], args.reference_deep_gain)
     )
 
     score_key = lambda item: item["test"]["4_macro_f1_plus_4_kappa"]["mean"]
