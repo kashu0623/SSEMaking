@@ -17,17 +17,23 @@
 ## 현재 Best
 
 ```text
-4-model stage-split flexible fusion
+4-model same-split initialization ensemble + stage-split flexible fusion
 classwise4_w_p0.72_c0.06_l0.00_li_p0.80_c0.02_l0.15_d_p0.82_c0.00_l0.18_rem_p0.00_c0.42_l0.13
 ```
 
 사용 모델:
 
 ```text
-1. original temporal = lstm_temporal_context20_h64_inverse
-2. full w20 = lstm_temporal_w20_context20_h64_inverse
-3. capacity_h128 = lstm_temporal_w20_context20_inverse_capacity_h128
-4. h128_ls003 = lstm_temporal_w20_context20_inverse_h128_ls003
+role별로 기존 checkpoint 1개 + 같은 outer split에서 initialization seed만 다른 replica 5개를
+probability-average한다.
+
+1. original temporal ensemble: 6 checkpoints
+2. full w20 ensemble: 6 checkpoints
+3. capacity_h128 ensemble: 6 checkpoints
+4. h128_ls003 ensemble: 6 checkpoints
+
+outer split 하나의 실제 fusion은 총 24 checkpoints다.
+outer seed 42/7/123은 3-seed 평가용이며 동시에 합쳐 배포하는 모델은 아니다.
 ```
 
 현재 best weight:
@@ -49,30 +55,36 @@ REM:
 3-seed 평균:
 
 ```text
-4M 0.4153 / 4K 0.2581
-Wake 0.5099 / Light 0.6414 / Deep 0.1274 / REM 0.3825
+4M 0.4151 / 4K 0.2649 / 4M+4K 0.6799
+Wake 0.5131 / Light 0.6740 / Deep 0.1000 / REM 0.3731
+Wake+REM 0.8862
 ```
 
 ## 이전 기준 대비 향상
 
-이전 fixed 2-model 기준:
+이전 single-checkpoint 4-model current best:
 
 ```text
-classwise_nonrem0.90_rem0.20
-4M 0.4074 / 4K 0.2458
-Wake 0.5034 / Light 0.6321 / Deep 0.1220 / REM 0.3722
+4M 0.4153 / 4K 0.2581 / 4M+4K 0.6734
+Wake 0.5099 / Light 0.6414 / Deep 0.1274 / REM 0.3825
+Wake+REM 0.8924
 ```
 
 현재 best 대비:
 
 ```text
-4 Macro +0.0079 (+1.94%)
-4 Kappa +0.0123 (+4.99%)
-Wake    +0.0065 (+1.30%)
-Light   +0.0093 (+1.47%)
-Deep    +0.0054 (+4.41%)
-REM     +0.0103 (+2.77%)
+4M+4K +0.0065 (+0.9696%)
+4 Macro -0.0003 (-0.0622%)
+4 Kappa +0.0068 (+2.6300%)
+Wake    +0.0032 (+0.6236%)
+Light   +0.0326 (+5.0756%)
+Deep    -0.0274 (-21.4834%)
+REM     -0.0094 (-2.4588%)
+Wake+REM -0.0062 (-0.6975%)
 ```
+
+4M+4K 차이가 0.0005보다 크므로 기존 선택 기준상 Wake+REM 하락에도 ensemble 후보를 새 best로 채택했다.
+다만 수면 알람 관점에서 Deep 붕괴가 확인되어 benchmark best와 alarm-oriented 후보를 별도로 추적한다.
 
 ## 최근 실험 흐름
 
@@ -155,7 +167,7 @@ REM     +0.0103 (+2.77%)
 
 17. 4-model flex4 kappa refine round7
     4K 0.2580 돌파 ridge 확장
-    현재 best 도출
+    single-checkpoint best 도출
     4M 0.4153 / 4K 0.2581
 
 18. 4-model oracle audit
@@ -166,6 +178,12 @@ REM     +0.0103 (+2.77%)
     oracle headroom의 일반화 가능성 검증
     test에서 큰 하락으로 탈락
     이후 학습 목표를 direct 4-class로 전환
+
+20. same-split multi-init ensemble
+    role별 기존 checkpoint + initialization replica 5개를 probability-average
+    새 benchmark best 도출
+    4M 0.4151 / 4K 0.2649
+    Light/Kappa는 개선됐지만 Deep이 0.1000으로 하락
 ```
 
 flex4_refine에서 pure 4M+4K top은 아래 후보였다.
@@ -587,6 +605,49 @@ causal gate의 Deep/REM은 0.0812/0.2067로 크게 붕괴했다. 반면 full val
 validation subject로만 학습한 direct class reclassifier가 test subject 분포에 과적합한 것으로 판단한다.
 따라서 이 gate 계열은 중단하며, OOF stacked gate는 별도 대규모 cross-fitting 실험으로 미룬다.
 
+same-split multi-init ensemble은 기존 single-checkpoint weight를 그대로 적용했지만 선택 기준상 새
+benchmark best가 됐다.
+
+```text
+candidate:
+classwise4_w_p0.72_c0.06_l0.00_li_p0.80_c0.02_l0.15_d_p0.82_c0.00_l0.18_rem_p0.00_c0.42_l0.13
+
+test 3-seed:
+4M 0.4151 / 4K 0.2649 / 4M+4K 0.6799
+Wake 0.5131 / Light 0.6740 / Deep 0.1000 / REM 0.3731
+Wake+REM 0.8862
+```
+
+이전 single-checkpoint best 대비 4M+4K는 +0.0065 (+0.9696%)다. 4K와 Light가 각각
++0.0068 (+2.6300%), +0.0326 (+5.0756%) 개선된 반면 Deep은 -0.0274 (-21.4834%) 하락했다.
+
+role ensemble 단독 Deep F1은 아래와 같다.
+
+```text
+original 0.0828 / full_w20 0.1016 / capacity_h128 0.1327 / h128_ls003 0.1106
+```
+
+현재 fusion Deep weight는 full_w20 0.82 / h128_ls003 0.18이고, role 중 Deep이 가장 높은
+capacity_h128 weight가 0이다. 따라서 single-checkpoint에서 찾은 Deep weight가 ensemble에는
+최적이 아닐 가능성이 높다.
+
+현재 ensemble best의 3개 outer test confusion matrix를 합산한 실제 N3 행:
+
+```text
+실제 N3 총 1,685:
+Wake 102 (6.05%)
+N1   216 (12.82%)
+N2 1,074 (63.74%)
+N3   176 (10.45%)
+REM  117 (6.94%)
+
+4-class:
+Light 1,290 (76.56%) / Deep 176 (10.45%)
+```
+
+Deep 오답 1,509개 중 85.49%가 Light이며, 그중 N2가 71.17%를 차지한다. 무작위 stage 혼동보다
+N2/N3 경계와 ensemble averaging에 의한 rare Deep probability 약화가 핵심 병목으로 보인다.
+
 ## 현재 코드 상태
 
 최근 추가된 핵심 스크립트:
@@ -611,6 +672,7 @@ scripts/run_four_model_oracle_audit_colab.sh
 scripts/run_four_model_causal_gate_colab.sh
 scripts/run_four_model_same_split_init_ensemble_colab.sh
 scripts/run_four_model_direct_4class_colab.sh
+scripts/run_four_model_deep_probability_audit_colab.sh
 ```
 
 기능:
@@ -639,6 +701,7 @@ src/sse_sleep/evaluate_four_model_causal_gate.py
 src/sse_sleep/average_prediction_ensemble.py
 src/sse_sleep/train_lstm_4class.py
 src/sse_sleep/evaluate_four_model_4class_fusion.py
+src/sse_sleep/evaluate_deep_probability_audit.py
 ```
 
 기능:
@@ -660,6 +723,11 @@ same-split init ensemble은 기존 outer split을 바꾸지 않고, 각 role에 
 direct 4-class trainer는 원래 N1/N2 label을 loss 계산 전에 Light로 합치고 Wake/Light/Deep/REM 네 logits만
 학습한다. checkpoint도 validation `4 Macro F1 + 4 Kappa`로 선택한다. 기존 5-class trainer와 checkpoint는
 변경하지 않으며, direct 4-class 후보가 current best를 넘기 전까지 current best도 유지한다.
+
+Deep probability audit는 same-split role ensemble NPZ를 재사용해 학습 없이 실행한다. 각 role과 current
+fusion의 N3-vs-non-N3 ROC-AUC/Average Precision을 측정하고, outer validation split에서 최대 F1 및
+Deep recall 50/70/80/90% floor별 threshold를 선택한 뒤 해당 outer test split에 그대로 적용한다.
+결과에는 precision/recall/specificity/F1/predicted-positive-rate와 score 분포를 저장한다.
 
 ## 최근 완료 실험
 
@@ -952,69 +1020,70 @@ Colab 실행:
 우선순위 1:
 
 ```text
-current four-role architecture의 direct 4-class training baseline
+current same-split ensemble best의 Deep probability/threshold audit
 ```
 
 목적:
 
 ```text
-현재 선택 기준과 실제 앱 목표는 Wake/Light/Deep/REM 4-class지만 기존 모델은 N1/N2를 따로 학습한 뒤
-평가에서만 합치고 있다. 앞으로는 N1/N2를 학습 전에 Light로 합쳐 불필요한 N1/N2 구분 손실을 제거한다.
-먼저 current 네 role을 outer seed 42/7/123에서 직접 4-class로 한 번씩 학습해 단일 모델과 fusion을 비교한다.
+현재 ensemble은 실제 N3의 76.56%를 Light로 argmax한다. argmax가 낮아도 N3 probability ranking
+신호가 남아 있다면 alarm veto threshold로 Deep recall을 복구할 수 있다. 각 outer validation에서만
+threshold를 선택하고 untouched test에 적용해 subject-shift 이후에도 분리력이 일반화되는지 확인한다.
 ```
 
-총 12개 모델을 학습한다: outer seed 3개 x role 4개. original/full_w20은 h64, capacity_h128과
-h128_ls003은 h128을 유지하며 ls003에만 label smoothing 0.03을 적용한다. fusion은 기존 current best의
-Wake/Light/Deep/REM role weight를 그대로 mapping해 1차 비교한다.
+재학습은 없다. 기존 same-split ensemble NPZ 12개(outer 3 x role 4)를 읽어 current best probability를
+재구성한다.
 
 Colab 실행:
 
 ```bash
 %cd /content/SSE
 !git pull
-!bash scripts/run_four_model_direct_4class_colab.sh
+!bash scripts/run_four_model_deep_probability_audit_colab.sh
 ```
 
 결과 summary JSON:
 
 ```text
-/content/drive/MyDrive/SSE_outputs/fusion4_direct_4class_context20_summary.json
+/content/drive/MyDrive/SSE_outputs/fusion4_same_split_init_ensemble_deep_probability_audit_context20_h64_summary.json
 ```
 
 비교 포인트:
 
 ```text
-1. direct4 role별 단일 모델과 mapped-weight fusion의 3-seed 4M+4K
-2. 5-class current best 대비 4M+4K 절대/상대 변화율
-3. N1/N2 분리 제거가 Light와 Kappa를 실제로 올리는지
-4. Deep/REM이 current best보다 유지 또는 개선되는지
-5. 기존 선택 기준(4M+4K tie band 0.0005, Wake+REM 우선)상 새 best 채택 여부
+1. current fusion과 role별 test ROC-AUC / Average Precision
+2. validation max-F1 threshold의 test Deep precision/recall/F1
+3. validation Deep recall 50/70/80/90% floor threshold가 test에서도 recall을 유지하는지
+4. threshold 적용 시 specificity와 predicted-positive-rate
+5. fusion보다 Deep ranking이 높은 role이 있는지
 ```
 
 결과에 따른 다음 분기:
 
 ```text
-direct 4-class가 current best를 넘음:
-  direct4 fusion weight refinement 후 same-split multi-init ensemble로 확장한다.
+fusion test ROC-AUC/AP가 충분하고 validation threshold가 test에 일반화됨:
+  alarm용 Deep veto operating point를 선택하고 temporal smoothing/duration audit로 확장한다.
 
-direct 4-class가 current best를 못 넘음:
-  class-weight/sqrt-weight ablation 후 5-class same-split ensemble과 새 architecture를 비교한다.
+role에는 신호가 있지만 fusion에서 약화됨:
+  ensemble-specific Deep weight refinement를 먼저 수행한다.
+
+모든 source의 ranking 신호가 약함:
+  direct 4-class baseline 및 N3-vs-rest binary specialist 학습으로 전환한다.
 ```
 
-보조 실험으로 `scripts/run_four_model_flex4_kappa_refinement_round8_colab.sh`도 준비되어 있지만,
-최근 round 상승폭이 seed 변동보다 훨씬 작으므로 oracle audit보다 우선하지 않는다.
+후속 학습 후보인 direct 4-class baseline은 `scripts/run_four_model_direct_4class_colab.sh`로 이미 준비되어 있다.
 
 ## 다음 채팅방 시작 프롬프트
 
 ```text
 docs/current_progress_summary.md를 읽고 이어서 진행해줘.
 현재 목표는 비용 무시, 성능-only fixed/flexible fusion 개선이야.
-현재 best는 4-model stage-split flexible fusion:
+현재 benchmark best는 4-role x 6-checkpoint same-split ensemble stage-split flexible fusion:
 classwise4_w_p0.72_c0.06_l0.00_li_p0.80_c0.02_l0.15_d_p0.82_c0.00_l0.18_rem_p0.00_c0.42_l0.13
-3-seed 평균은 4M 0.4153 / 4K 0.2581 / Wake 0.5099 / Light 0.6414 / Deep 0.1274 / REM 0.3825.
-앞으로 학습 목표는 Wake/Light/Deep/REM direct 4-class로 전환한다.
-다음 실험은 current four-role architecture의 direct 4-class baseline이야.
-Colab에서는 git pull 후 scripts/run_four_model_direct_4class_colab.sh를 실행하면 돼.
-결과 summary JSON을 받으면 role별 direct4 모델과 mapped-weight fusion을 current best 대비 4M+4K,
-Wake+REM, Light/Deep으로 비교하고 새 best 채택 여부를 판단해 이 current_progress_summary.md를 갱신해줘.
+3-seed 평균은 4M 0.4151 / 4K 0.2649 / Wake 0.5131 / Light 0.6740 / Deep 0.1000 / REM 0.3731.
+실제 N3의 76.56%를 Light로 오인해 alarm-oriented Deep 성능을 별도로 개선해야 한다.
+다음 실험은 current ensemble의 Deep probability/threshold audit다.
+Colab에서는 git pull 후 scripts/run_four_model_deep_probability_audit_colab.sh를 실행하면 돼.
+결과 summary JSON을 받으면 fusion/role별 ROC-AUC/AP와 validation-selected threshold의 test
+Deep precision/recall/specificity/F1을 분석하고 다음 Deep 개선 실험을 결정해줘.
 ```
