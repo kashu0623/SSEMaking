@@ -195,6 +195,12 @@ Wake+REM -0.0062 (-0.6975%)
     모든 temporal variant의 test ROC-AUC/AP가 raw보다 낮음
     EMA 0.80의 threshold F1 개선도 0.2% 안팎으로 실질 개선 아님
     후처리 방향을 중단하고 direct 4-class 학습으로 전환
+
+23. current four-role direct 4-class baseline
+    original direct4가 Deep F1 0.1767로 benchmark의 0.1000보다 크게 개선
+    하지만 4M+4K 0.6641로 benchmark 0.6799보다 낮아 benchmark best는 유지
+    기존 5-class weight를 direct4 role에 그대로 mapping한 fusion은 Deep 0.0418로 실패
+    current benchmark + original direct4 Deep specialist hybrid refinement로 전환
 ```
 
 flex4_refine에서 pure 4M+4K top은 아래 후보였다.
@@ -740,6 +746,38 @@ Deep 문제는 후처리보다 학습 표현과 목적함수 문제로 판단한
 direct 4-class baseline을 실행하고, 그래도 Deep ranking/recall이 부족하면 N3-vs-rest binary specialist를
 별도 alarm veto 모델로 학습한다.
 
+direct 4-class baseline 결과, `original_4class`가 Deep을 뚜렷하게 복구했지만 전체 benchmark는 넘지 못했다.
+
+```text
+candidate          4M      4K      4M+4K  Wake    Light   Deep    REM
+benchmark best     0.4151  0.2649  0.6799  0.5131  0.6740  0.1000  0.3731
+original direct4   0.4160  0.2481  0.6641  0.5208  0.6363  0.1767  0.3301
+mapped fusion      0.3896  0.2469  0.6365  0.5188  0.6558  0.0418  0.3419
+```
+
+`original_4class`의 benchmark 대비 변화:
+
+```text
+4M+4K -0.0158 (-2.3221%)
+4 Macro +0.0009 (+0.2232%)
+4 Kappa -0.0167 (-6.3109%)
+Wake +0.0076 (+1.4908%)
+Light -0.0377 (-5.5874%)
+Deep +0.0767 (+76.6818%)
+REM -0.0430 (-11.5192%)
+Wake+REM -0.0353 (-3.9863%)
+```
+
+pooled confusion에서 실제 Deep 1,685개 중 정답은 `176 -> 268`로 92개 증가(+52.27%)했고,
+Deep→Light 오답은 `1,290 -> 1,101`, 비율은 `76.56% -> 65.34%`로 11.22%p 감소했다.
+즉 direct4 학습 자체는 Deep specialist로 유효하다. 다만 outer seed별 Deep F1이 0.2613/0.1070/0.1618로
+편차가 크고 Light/Kappa/REM 손실 때문에 단독 benchmark best로는 채택하지 않는다.
+
+기존 mapped fusion이 실패한 주원인은 5-class best의 Deep weight 82%를 direct4의 `full_w20_4class`에
+그대로 배정한 것이다. 이 role의 test Deep F1은 0.0420뿐이므로 direct4에서는 기존 role weight를
+재사용할 수 없다. 다음은 current benchmark의 기존 argmax를 정확히 보존하면서 가장 강한
+`original_4class` 확률을 stage별로 주입하는 no-training hybrid grid다.
+
 ## 현재 코드 상태
 
 최근 추가된 핵심 스크립트:
@@ -766,6 +804,7 @@ scripts/run_four_model_same_split_init_ensemble_colab.sh
 scripts/run_four_model_direct_4class_colab.sh
 scripts/run_four_model_deep_probability_audit_colab.sh
 scripts/run_four_model_deep_temporal_probability_audit_colab.sh
+scripts/run_four_model_direct4_hybrid_deep_refinement_colab.sh
 ```
 
 기능:
@@ -796,6 +835,7 @@ src/sse_sleep/train_lstm_4class.py
 src/sse_sleep/evaluate_four_model_4class_fusion.py
 src/sse_sleep/evaluate_deep_probability_audit.py
 src/sse_sleep/evaluate_deep_temporal_probability_audit.py
+src/sse_sleep/evaluate_direct4_hybrid_deep_fusion.py
 ```
 
 기능:
@@ -1121,61 +1161,48 @@ Colab 실행:
 우선순위 1:
 
 ```text
-current four-role architecture의 direct 4-class training baseline
+current same-split ensemble benchmark + original direct4 stage-wise hybrid Deep refinement
 ```
 
 목적:
 
 ```text
-기존 5-class 모델은 N1/N2를 따로 학습한 뒤 평가에서만 Light로 합친다. temporal smoothing도 Deep
-분리를 개선하지 못했으므로 N1/N2를 loss 전에 Light로 합치고 Wake/Light/Deep/REM을 직접 학습한다.
-불필요한 N1/N2 경계를 제거해 모델 용량과 gradient를 Light-vs-Deep 경계에 집중한다.
+current benchmark의 높은 Light/Kappa/REM을 유지하면서 Deep F1이 강한 original direct4 확률만
+선택적으로 주입한다. current 5-class 확률은 Wake/max(N1,N2)/N3/REM으로 변환해 alpha=0일 때
+기존 5-class argmax 후 N1/N2 merge 판정을 정확히 재현한다.
 ```
 
-outer seed 42/7/123 x role 4개로 총 12개 모델을 학습한다. original/full_w20은 h64,
-capacity_h128/h128_ls003은 h128을 유지하고 ls003에만 label smoothing 0.03을 적용한다.
-checkpoint는 validation `4 Macro F1 + 4 Kappa`로 선택하며 기존 best weight를 4-class에 mapping해
-1차 fusion도 평가한다.
+기본 grid는 Wake 0/0.10/0.20, Light 0/0.05/0.10, Deep 0~1.0 간격 0.10,
+REM 0/0.10/0.20으로 총 297개다. 학습 없이 기존 prediction NPZ만 사용하며 summary에는
+후보별 평균 metric과 pooled confusion만 기록해 파일 크기를 작게 유지한다.
 
 Colab 실행:
 
 ```bash
 %cd /content/SSE
 !git pull
-!bash scripts/run_four_model_direct_4class_colab.sh
+!bash scripts/run_four_model_direct4_hybrid_deep_refinement_colab.sh
 ```
 
 결과 summary JSON:
 
 ```text
-/content/drive/MyDrive/SSE_outputs/fusion4_direct_4class_context20_summary.json
+/content/drive/MyDrive/SSE_outputs/fusion4_same_split_ensemble_plus_direct4_original_hybrid_deep_refine_context20_h64_summary.json
 ```
 
 비교 포인트:
 
 ```text
-1. direct4 role별 단일 모델과 mapped-weight fusion의 3-seed 4M+4K
-2. benchmark best 대비 4M+4K 및 Wake+REM 절대/상대 변화율
-3. Light와 4K 개선 여부
-4. Deep F1/precision/recall과 Light→Deep, Deep→Light confusion
-5. 기존 best의 Deep F1 0.1000 및 pooled recall 0.1045보다 개선되는지
-6. 기존 선택 기준상 새 benchmark best 채택 여부
+1. alpha=0 current baseline이 현재 best 4M 0.4151 / 4K 0.2649를 정확히 재현하는지
+2. pure 4M+4K top과 0.0005 tie rule selected 후보
+3. benchmark best 대비 모든 metric의 절대/상대 변화율
+4. Deep F1/precision/recall과 pooled Deep→Light 변화
+5. best alpha가 grid edge면 해당 축을 0.02~0.05 간격으로 refinement
 ```
 
-결과에 따른 다음 분기:
-
-```text
-direct4가 benchmark best를 넘고 Deep도 개선:
-  direct4 fusion weight refinement 후 same-split multi-init ensemble로 확장한다.
-
-direct4가 benchmark best는 못 넘지만 Deep이 크게 개선:
-  benchmark best와 alarm-oriented best를 분리하고 direct4 Deep specialist/fusion을 검토한다.
-
-direct4도 Deep을 개선하지 못함:
-  N3-vs-rest binary specialist를 여러 class-weight/sampler/init 설정으로 학습한다.
-```
-
-후속 binary specialist 기반 코드는 `src/sse_sleep/train_binary_specialist.py`에 준비되어 있다.
+hybrid도 유효한 Deep 개선 없이 benchmark를 넘지 못하면 다음은 `original direct4`의 same-split
+multi-init ensemble을 만들어 seed variance를 줄인 뒤 hybrid를 다시 탐색한다. 그 다음 우선순위가
+class-weight/sampler/init을 넓힌 N3-vs-rest binary specialist다.
 
 ## 다음 채팅방 시작 프롬프트
 
@@ -1186,12 +1213,11 @@ docs/current_progress_summary.md를 읽고 이어서 진행해줘.
 classwise4_w_p0.72_c0.06_l0.00_li_p0.80_c0.02_l0.15_d_p0.82_c0.00_l0.18_rem_p0.00_c0.42_l0.13
 3-seed 평균은 4M 0.4151 / 4K 0.2649 / Wake 0.5131 / Light 0.6740 / Deep 0.1000 / REM 0.3731.
 실제 N3의 76.56%를 Light로 오인해 alarm-oriented Deep 성능을 별도로 개선해야 한다.
-Deep probability audit에서 fusion test ROC-AUC 0.7362 / AP 0.1055로 신호는 남아 있지만,
-validation recall 90% threshold가 test recall 78.75% / specificity 55.45% / positive-rate 46.17%여서
-raw threshold는 alarm veto로 채택하지 않았다.
-Causal temporal audit에서도 raw ROC-AUC/AP가 모든 mean/EMA보다 높아 후처리 방향을 중단했다.
-다음 실험은 current four-role architecture의 direct 4-class baseline이다.
-Colab에서는 git pull 후 scripts/run_four_model_direct_4class_colab.sh를 실행하면 돼.
-결과 summary JSON을 받으면 role별 direct4 모델과 mapped-weight fusion을 benchmark best 대비
-4M+4K, Wake+REM, Light/Deep으로 비교하고 새 best 및 다음 Deep 실험을 결정해줘.
+direct 4-class 결과에서 original direct4는 Deep F1 0.1767로 benchmark 0.1000보다 76.68% 높고,
+Deep 정답도 176->268로 늘렸지만 4M+4K는 0.6641로 benchmark 0.6799보다 2.32% 낮아 탈락했다.
+기존 weight mapped direct4 fusion도 Deep 0.0418로 실패했다.
+다음 실험은 current benchmark와 original direct4의 stage-wise hybrid Deep refinement다.
+Colab에서는 git pull 후 scripts/run_four_model_direct4_hybrid_deep_refinement_colab.sh를 실행하면 돼.
+결과 summary JSON을 받으면 alpha=0 baseline 재현, pure top/tie-rule selected, benchmark 대비
+4M+4K/Wake+REM/Light/Deep 변화와 상대 향상률을 비교하고 새 best 및 refinement 방향을 결정해줘.
 ```
