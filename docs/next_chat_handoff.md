@@ -26,15 +26,20 @@ round3 best 대비 4M+4K +0.0012%, Deep -1.8444%, Wake+REM +0.0986%다.
 round4 pure top과 selected 차이는 0.000374이고 selected의 Wake+REM이 더 높아 tie rule로 채택했다.
 static grid는 포화되어 중단한다.
 
-다음 실험은 original direct4 same-split multi-init ensemble + hybrid recalibration이야.
-기존 direct4 1개와 같은 outer split의 새 init replica 5개를 평균해 6-checkpoint specialist로 만든다.
+6-checkpoint direct4 평균은 single 대비 단독 4M+4K +1.4886%, Kappa +5.0822%였지만
+Deep F1이 -33.4829%로 붕괴했다. 최상 hybrid도 current best 대비 4M+4K -2.2964%,
+Deep -24.0839%라 채택하지 않았고 current best를 유지한다.
+
+다음 실험은 single/6-checkpoint direct4 classwise source blend + hybrid recalibration이야.
+Wake/Light/Deep/REM마다 single과 ensemble의 혼합 beta를 따로 탐색하고, 유망 source만 hybrid한다.
+기존 single source와 current best weight도 정확히 포함한다.
 
 Colab 실행:
 %cd /content/SSE
 !git pull
-!bash scripts/run_direct4_original_same_split_init_ensemble_hybrid_colab.sh
+!bash scripts/run_direct4_classwise_source_blend_hybrid_colab.sh
 
-결과 summary JSON을 받으면 pure top/tie-rule selected, round4 best 대비 4M+4K, Wake+REM,
-Light/Deep의 절대/상대 변화율과 Deep confusion 변화를 비교하고 새 best 및 다음 방향을 정한 뒤
-docs/current_progress_summary.md를 갱신해줘.
+결과 summary JSON을 받으면 current best 정확 재현, source beta, pure top/tie-rule selected,
+current best 대비 4M+4K/Wake+REM/Light/Deep의 절대/상대 변화율과 Deep confusion 변화를
+비교하고 새 best 및 다음 방향을 정한 뒤 docs/current_progress_summary.md를 갱신해줘.
 ```

@@ -250,6 +250,15 @@ Deep도 악화되어 static test-grid refinement는 여기서 중단한다.
     4M 0.4378 / 4K 0.2799 / 4M+4K 0.7177 / Wake+REM 0.9072
     직전 best 대비 4M+4K +0.0012%, Wake+REM +0.0986%, Deep -1.8444%
     static grid를 중단하고 original direct4 same-split multi-init ensemble로 전환
+
+28. original direct4 same-split multi-init ensemble + hybrid recalibration
+    기존 direct4 1개와 새 initialization replica 5개를 동일 가중 평균
+    direct4 단독 4M+4K는 +1.4886%, Kappa는 +5.0822% 개선
+    하지만 direct4 단독 Deep F1이 -33.4829%로 붕괴
+    hybrid pure top/tie-rule selected는 hybrid_w0.15_li0.55_d0.85_rem0.00_dg1.20
+    4M 0.4264 / 4K 0.2748 / 4M+4K 0.7012 / Deep 0.1316 / Wake+REM 0.8996
+    current best 대비 4M+4K -2.2964%, Deep -24.0839%이므로 채택하지 않음
+    single/ensemble direct4 score를 stage별로 섞는 source blend audit로 전환
 ```
 
 flex4_refine에서 pure 4M+4K top은 아래 후보였다.
@@ -938,6 +947,53 @@ Light를 0.50까지 확장했지만 top은 다시 0.34에 남았다. test 4M+4K 
 포화됐다고 판단한다. 이후에는 original direct4 specialist의 same-split multi-init
 probability ensemble로 모델 자체의 분산을 줄인 뒤 hybrid를 다시 보정한다.
 
+original direct4 same-split multi-init ensemble 결과, pure top, tie-rule selected,
+tie band 내 Deep top이 모두 아래 후보로 일치했다.
+
+```text
+hybrid_w0.15_li0.55_d0.85_rem0.00_dg1.20
+4M 0.4264 / 4K 0.2748 / 4M+4K 0.701199
+Wake 0.5265 / Light 0.6745 / Deep 0.1316 / REM 0.3731
+Deep precision 0.1612 / Deep recall 0.1264 / Wake+REM 0.8996
+```
+
+current best 대비:
+
+```text
+4M+4K -0.016481 (-2.2964%)
+4 Macro -0.011397 (-2.6032%)
+4 Kappa -0.005083 (-1.8164%)
+Wake -0.005271 (-0.9911%)
+Light +0.003771 (+0.5623%)
+Deep -0.041755 (-24.0839%)
+Deep precision -0.047125 (-22.6256%)
+Deep recall -0.050505 (-28.5562%)
+REM -0.002335 (-0.6220%)
+Wake+REM -0.007606 (-0.8384%)
+```
+
+pooled Deep 정답은 `287 -> 209`로 78개(-27.18%) 줄었고, Deep→Light는
+`1,186 -> 1,264`, `70.39% -> 75.01%`로 4.63%p 증가했다. 따라서 새 hybrid는
+채택하지 않고 25-checkpoint current best를 유지한다.
+
+6-checkpoint direct4 단독을 기존 single direct4와 비교하면 결과가 양면적이다.
+
+```text
+4M+4K 0.6641 -> 0.6740 (+1.4886%)
+4 Macro 0.4160 -> 0.4133 (-0.6551%)
+4 Kappa 0.2481 -> 0.2607 (+5.0822%)
+Wake 0.5208 -> 0.5300 (+1.7783%)
+Light 0.6363 -> 0.6585 (+3.4872%)
+Deep 0.1767 -> 0.1175 (-33.4829%)
+REM 0.3301 -> 0.3469 (+5.0937%)
+```
+
+즉 초기화 평균은 Wake/Light/REM과 Kappa에는 유효하지만 기존 single direct4의 핵심 역할인
+Deep specialist 성능을 희석했다. 전체 앙상블을 버리기보다 Wake/Light/REM은 ensemble 쪽,
+Deep은 single 쪽을 더 쓰도록 direct4 source 자체를 stage별로 혼합한 뒤 hybrid를 재보정한다.
+이전 실험의 validation 4M+4K는 `0.6831`로 current best의 `0.6660`보다 높아, stage별
+정보 회수 가능성도 남아 있다.
+
 ## 현재 코드 상태
 
 최근 추가된 핵심 스크립트:
@@ -969,6 +1025,7 @@ scripts/run_four_model_direct4_hybrid_deep_refinement_round2_colab.sh
 scripts/run_four_model_direct4_hybrid_deep_refinement_round3_colab.sh
 scripts/run_four_model_direct4_hybrid_deep_refinement_round4_colab.sh
 scripts/run_direct4_original_same_split_init_ensemble_hybrid_colab.sh
+scripts/run_direct4_classwise_source_blend_hybrid_colab.sh
 ```
 
 기능:
@@ -1001,6 +1058,7 @@ src/sse_sleep/evaluate_four_model_4class_fusion.py
 src/sse_sleep/evaluate_deep_probability_audit.py
 src/sse_sleep/evaluate_deep_temporal_probability_audit.py
 src/sse_sleep/evaluate_direct4_hybrid_deep_fusion.py
+src/sse_sleep/evaluate_direct4_source_blend_hybrid.py
 ```
 
 기능:
@@ -1326,27 +1384,35 @@ Colab 실행:
 우선순위 1:
 
 ```text
-original direct4 same-split multi-init ensemble + current hybrid recalibration
+single/6-checkpoint direct4 classwise source blend + hybrid recalibration
 ```
 
 목적:
 
 ```text
-기존 24-checkpoint current ensemble은 유지한다.
-outer split별 기존 original direct4 checkpoint 1개와 같은 split의 새 initialization replica
-5개를 probability-average해 6-checkpoint direct4 specialist를 만든다. specialist 초기화 분산을
-줄인 뒤 stage별 hybrid alpha와 Deep gain을 넓은 compact grid로 다시 보정한다.
+6-checkpoint direct4 ensemble은 Wake/Light/REM과 Kappa를 개선했지만 Deep을 크게 희석했다.
+각 stage score마다 기존 single direct4와 6-checkpoint ensemble의 혼합 비율 beta를 따로 탐색한다.
+135개 source 조합 중 4M+4K 상위, Deep 상위, tie-rule 후보와 single/ensemble 양 끝점을 추려
+hybrid alpha와 Deep gain을 재보정한다. 기존 single source와 current best weight를 정확히
+포함하므로 새 조합이 실패해도 current best가 재현되어야 한다.
 ```
 
 grid:
 
 ```text
-Wake alpha: 0.15, 0.225, 0.30, 0.3125, 0.375, 0.45
-Light alpha: 0.15, 0.25, 0.34, 0.45, 0.55
-Deep alpha: 0.50, 0.70, 0.85, 1.00
-REM alpha: 0.00
-Deep gain: 0.80, 1.00, 1.20, 1.40, 1.60
-총 600개 + alpha=0 baseline
+source ensemble beta:
+  Wake 0.00, 0.50, 1.00
+  Light 0.00, 0.50, 1.00
+  Deep 0.00, 0.10, 0.25, 0.50, 1.00
+  REM 0.00, 0.50, 1.00
+  총 135개 source 조합
+
+hybrid:
+  Wake alpha 0.10, 0.15, 0.225, 0.30, 0.3125
+  Light alpha 0.25, 0.34, 0.45, 0.55
+  Deep alpha 0.70, 0.85, 1.00
+  REM alpha 0.00
+  Deep gain 1.00, 1.20, 1.40, 1.60
 ```
 
 Colab 실행:
@@ -1354,27 +1420,28 @@ Colab 실행:
 ```bash
 %cd /content/SSE
 !git pull
-!bash scripts/run_direct4_original_same_split_init_ensemble_hybrid_colab.sh
+!bash scripts/run_direct4_classwise_source_blend_hybrid_colab.sh
 ```
 
 결과 summary JSON:
 
 ```text
-/content/drive/MyDrive/SSE_outputs/fusion4_same_split_ensemble_plus_direct4_original_init_ensemble_hybrid_context20_h64_summary.json
+/content/drive/MyDrive/SSE_outputs/fusion4_direct4_classwise_source_blend_hybrid_context20_h64_summary.json
 ```
 
 비교 포인트:
 
 ```text
-1. 새 direct4 6-checkpoint ensemble 자체가 기존 single direct4보다 outer-seed 분산을 줄이는지
-2. pure 4M+4K top과 0.0005 tie-rule selected 후보
-3. round4 current best 대비 모든 metric의 절대/상대 변화율
-4. Deep precision/recall/F1과 pooled Deep 정답 및 Deep→Light 변화
-5. 새 specialist가 유효하면 더 많은 init 또는 다른 direct4 architecture ensemble로 확장할지
+1. current_best_reference가 4M+4K 0.717680을 정확히 재현하는지
+2. source별 ensemble beta가 Deep에는 0 근처, 다른 stage에는 더 크게 선택되는지
+3. pure top과 0.0005 tie-rule selected 후보
+4. current best 대비 모든 metric의 절대/상대 변화율
+5. Deep precision/recall/F1과 pooled Deep 정답 및 Deep→Light 변화
 ```
 
-새 후보를 채택하면 outer split 하나의 추론 구성은 current 24 checkpoints + direct4 6
-checkpoints로 총 30 checkpoints다. outer seed 42/7/123은 계속 평가 반복이며 합쳐 배포하지 않는다.
+새 후보에서 ensemble beta가 하나라도 0보다 크면 outer split 하나의 추론 구성은 current 24
+checkpoints + direct4 6 checkpoints로 총 30 checkpoints다. 모든 beta가 0이면 기존
+25-checkpoint current best와 같다.
 
 ## 다음 채팅방 시작 프롬프트
 
@@ -1386,8 +1453,9 @@ hybrid_w0.31_li0.34_d0.85_rem0.00_dg1.20
 3-seed 평균은 4M 0.4378 / 4K 0.2799 / 4M+4K 0.7177,
 Wake 0.5318 / Light 0.6707 / Deep 0.1734 / REM 0.3754 / Wake+REM 0.9072이다.
 round3 best 대비 4M+4K +0.0012%, Deep -1.8444%, Wake+REM +0.0986%다.
-다음 실험은 original direct4 same-split multi-init ensemble + hybrid recalibration이다.
-Colab에서는 git pull 후 scripts/run_direct4_original_same_split_init_ensemble_hybrid_colab.sh를 실행하면 돼.
-결과 summary JSON을 받으면 round4 best 대비 4M+4K/Wake+REM/Light/Deep의 절대/상대 변화율,
-Deep confusion 변화를 비교하고 새 best 및 다음 방향을 결정해줘.
+6-checkpoint direct4 평균 hybrid는 current best 대비 4M+4K -2.2964%, Deep -24.0839%로 실패했다.
+다음 실험은 single/6-checkpoint direct4 classwise source blend + hybrid recalibration이다.
+Colab에서는 git pull 후 scripts/run_direct4_classwise_source_blend_hybrid_colab.sh를 실행하면 돼.
+결과 summary JSON을 받으면 current best 정확 재현, source beta, pure top/tie-rule selected,
+current best 대비 모든 metric과 Deep confusion 변화를 비교하고 새 best 및 다음 방향을 결정해줘.
 ```
