@@ -9,28 +9,32 @@ docs/current_progress_summary.md를 읽고 이어서 진행해줘.
 현재 목표는 비용, 모델 수, 추론량을 무시하고 성능-only 기준으로 DreamT sleep stage estimation fixed/flexible fusion 성능을 개선하는 거야.
 
 현재 best는 24-checkpoint same-split ensemble + original direct4 hybrid:
-hybrid_w0.20_li0.10_d1.00_rem0.00
+hybrid_w0.30_li0.24_d0.95_rem0.00_dg1.30
 
 3-seed 평균:
-4M 0.4331 / 4K 0.2751 / 4M+4K 0.7082
-Wake 0.5233 / Light 0.6746 / Deep 0.1592 / REM 0.3752 / Wake+REM 0.8984
+4M 0.4382 / 4K 0.2787 / 4M+4K 0.7169
+Wake 0.5306 / Light 0.6700 / Deep 0.1776 / REM 0.3745 / Wake+REM 0.9052
 
 선택 기준:
 3-seed 평균에서 4M+4K가 가장 높은 후보를 best로 둔다.
 단, 4M+4K 차이가 0.0005 이하이면 Wake+REM이 더 높은 후보를 우선한다.
 
-이전 best 대비 4M+4K +4.1600%, Deep +59.1888%, Wake+REM +1.3796%다.
-pooled Deep 정답은 176->242, Deep->Light는 1,290->1,230으로 개선됐다.
-round1 best가 Wake 0.20/Light 0.10/Deep 1.00 grid 상단에 걸렸다.
+최종 알람은 수면 단계 AI 단독이 아니라 미세 움직임/RR/RRV/HR/HRV/피부온도 변화를
+0~1 정규화 후 가중합하는 PotchArousalCalculator의 각성 점수와 함께 판단할 예정이다.
 
-다음 실험은 Wake/Light edge 확장 + Deep gain hybrid refinement round2야.
+round1 best 대비 4M+4K +1.2352%, Deep +11.5637%, Wake+REM +0.7500%다.
+pooled Deep 정답은 242->298, Deep->Light는 1,230->1,173으로 개선됐다.
+round2 pure top은 Light 0.24 상단/Deep alpha 0.95 하단에 걸렸고,
+Deep alpha 1.00/Light 0.18 ridge와 4M+4K 차이가 0.00004뿐이다.
+
+다음 실험은 두 near-tied Light/Deep ridge를 덮는 hybrid refinement round3야.
 
 Colab 실행:
 %cd /content/SSE
 !git pull
-!bash scripts/run_four_model_direct4_hybrid_deep_refinement_round2_colab.sh
+!bash scripts/run_four_model_direct4_hybrid_deep_refinement_round3_colab.sh
 
-결과 summary JSON을 받으면 round1 best 재현, pure top/tie-rule selected, round1 best 대비
+결과 summary JSON을 받으면 round2 best 재현, pure top/tie-rule selected, round2 best 대비
 4M+4K, Wake+REM, Light/Deep의 절대/상대 변화율을 비교하고 새 best 및 다음 방향을 정한 뒤
 docs/current_progress_summary.md를 갱신해줘.
 ```
