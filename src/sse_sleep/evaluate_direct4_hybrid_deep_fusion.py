@@ -33,6 +33,7 @@ DEFAULT_WAKE_ALPHAS = (0.0, 0.10, 0.20)
 DEFAULT_LIGHT_ALPHAS = (0.0, 0.05, 0.10)
 DEFAULT_DEEP_ALPHAS = tuple(index / 10.0 for index in range(11))
 DEFAULT_REM_ALPHAS = (0.0, 0.10, 0.20)
+DEFAULT_DEEP_GAINS = (1.0,)
 TIE_BAND = 0.0005
 
 
@@ -88,11 +89,13 @@ def hybrid_fusion(
     current_probs_4: np.ndarray,
     direct4_probs: np.ndarray,
     class_alphas: np.ndarray,
+    deep_gain: float,
 ) -> np.ndarray:
     fused = (
         (1.0 - class_alphas.reshape(1, -1)) * current_probs_4
         + class_alphas.reshape(1, -1) * direct4_probs
     )
+    fused[:, 2] *= deep_gain
     row_sums = fused.sum(axis=1, keepdims=True)
     return np.divide(fused, row_sums, out=np.zeros_like(fused), where=row_sums > 0)
 
@@ -221,6 +224,7 @@ def aggregate_reports(reports: Sequence[dict[str, Any]]) -> dict[str, Any]:
 def evaluate_candidate(
     seed_data: Sequence[dict[str, Any]],
     class_alphas: np.ndarray,
+    deep_gain: float,
 ) -> dict[str, Any]:
     reports = []
     for seed in seed_data:
@@ -231,18 +235,20 @@ def evaluate_candidate(
                 data["current_probs"],
                 data["direct4_probs"],
                 class_alphas,
+                deep_gain,
             )
             report[split] = summarize(data["y_true"], fused)
         reports.append(report)
     return {
         "name": (
             f"hybrid_w{class_alphas[0]:.2f}_li{class_alphas[1]:.2f}_"
-            f"d{class_alphas[2]:.2f}_rem{class_alphas[3]:.2f}"
+            f"d{class_alphas[2]:.2f}_rem{class_alphas[3]:.2f}_dg{deep_gain:.2f}"
         ),
         "direct4_alphas": {
             stage: float(class_alphas[index])
             for index, stage in enumerate(STAGE4_NAMES)
         },
+        "deep_gain": float(deep_gain),
         **aggregate_reports(reports),
     }
 
@@ -290,6 +296,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--light-alphas", default=None)
     parser.add_argument("--deep-alphas", default=None)
     parser.add_argument("--rem-alphas", default=None)
+    parser.add_argument("--deep-gains", default=None)
     parser.add_argument("--tie-band", type=float, default=TIE_BAND)
     parser.add_argument("--out-json", type=Path, required=True)
     return parser.parse_args()
@@ -339,24 +346,37 @@ def main() -> None:
         parse_float_list(args.deep_alphas, DEFAULT_DEEP_ALPHAS),
         parse_float_list(args.rem_alphas, DEFAULT_REM_ALPHAS),
     )
+    deep_gains = parse_float_list(args.deep_gains, DEFAULT_DEEP_GAINS)
     if any(not values for values in grids):
         raise ValueError("Every alpha grid must contain at least one value")
+    if not deep_gains:
+        raise ValueError("Deep gain grid must contain at least one value")
     if any(value < 0.0 or value > 1.0 for values in grids for value in values):
         raise ValueError("Hybrid alphas must be in [0, 1]")
+    if any(value <= 0.0 for value in deep_gains):
+        raise ValueError("Deep gains must be positive")
 
-    alpha_combinations = list(itertools.product(*grids))
-    zero_alphas = (0.0, 0.0, 0.0, 0.0)
-    if zero_alphas not in alpha_combinations:
-        alpha_combinations.append(zero_alphas)
+    combinations = [
+        (*alphas, deep_gain)
+        for alphas, deep_gain in itertools.product(itertools.product(*grids), deep_gains)
+    ]
+    baseline_combination = (0.0, 0.0, 0.0, 0.0, 1.0)
+    if baseline_combination not in combinations:
+        combinations.append(baseline_combination)
     candidates = [
-        evaluate_candidate(seed_data, np.asarray(alphas, dtype=np.float32))
-        for alphas in alpha_combinations
+        evaluate_candidate(
+            seed_data,
+            np.asarray(combination[:4], dtype=np.float32),
+            combination[4],
+        )
+        for combination in combinations
     ]
     selections = select_candidates(candidates, args.tie_band)
     current_baseline = next(
         candidate
         for candidate in candidates
         if all(alpha == 0.0 for alpha in candidate["direct4_alphas"].values())
+        and candidate["deep_gain"] == 1.0
     )
     report = {
         "experiment": "current_same_split_ensemble_plus_direct4_original_hybrid",
@@ -365,13 +385,17 @@ def main() -> None:
             "current_5_to_4_score_mapping": "Wake, max(N1,N2), N3, REM",
             "mapping_reason": "preserves current five-class argmax after N1/N2 label merge",
             "hybrid": "(1-alpha[class])*current + alpha[class]*direct4_original",
+            "deep_gain": "multiply the hybrid Deep score before final argmax",
             "selection": (
                 "highest test 3-seed mean 4M+4K; within tie band choose highest Wake+REM"
             ),
         },
         "grids": {
-            stage: [float(value) for value in grids[index]]
-            for index, stage in enumerate(STAGE4_NAMES)
+            **{
+                stage: [float(value) for value in grids[index]]
+                for index, stage in enumerate(STAGE4_NAMES)
+            },
+            "DeepGain": [float(value) for value in deep_gains],
         },
         "candidate_count": len(candidates),
         "current_baseline": current_baseline,
