@@ -22,15 +22,16 @@ classwise4_w_p0.72_c0.06_l0.00_li_p0.80_c0.02_l0.15_d_p0.82_c0.00_l0.18_rem_p0.0
 Deep probability audit에서 fusion test ROC-AUC 0.7362 / AP 0.1055로 신호는 남아 있지만,
 validation recall 90% threshold가 test recall 78.75% / specificity 55.45% / positive-rate 46.17%여서
 raw threshold는 alarm veto로 채택하지 않았다.
+Causal temporal audit에서도 raw ROC-AUC/AP가 모든 causal mean/EMA보다 높아 후처리 방향을 중단했다.
 
-다음 실험은 current ensemble의 causal temporal Deep probability audit야.
+다음 실험은 current four-role architecture의 direct 4-class baseline이야.
 
 Colab 실행:
 %cd /content/SSE
 !git pull
-!bash scripts/run_four_model_deep_temporal_probability_audit_colab.sh
+!bash scripts/run_four_model_direct_4class_colab.sh
 
-결과 summary JSON을 받으면 raw 대비 causal mean/EMA의 ROC-AUC/AP와 validation-selected threshold의
-test Deep precision/recall/specificity/F1을 분석하고, hysteresis/ensemble Deep weight refinement/
-direct4/binary specialist 중 다음 방향을 정한 뒤 docs/current_progress_summary.md를 갱신해줘.
+결과 summary JSON을 받으면 role별 direct4 모델과 mapped-weight fusion을 benchmark best 대비
+4M+4K, Wake+REM, Light/Deep으로 비교하고, 새 best 및 direct4 refinement/N3 binary specialist 중
+다음 방향을 정한 뒤 docs/current_progress_summary.md를 갱신해줘.
 ```

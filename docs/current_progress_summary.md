@@ -189,6 +189,12 @@ Wake+REM -0.0062 (-0.6975%)
     current ensemble N3 probability의 ranking 및 validation-selected threshold 일반화 측정
     test ROC-AUC 0.7362 / AP 0.1055로 신호는 남아 있음
     raw threshold만으로는 recall과 false-positive tradeoff가 alarm veto에 부족
+
+22. Causal temporal Deep probability audit
+    raw/causal mean 3,5,10/EMA 0.20,0.40,0.60,0.80 비교
+    모든 temporal variant의 test ROC-AUC/AP가 raw보다 낮음
+    EMA 0.80의 threshold F1 개선도 0.2% 안팎으로 실질 개선 아님
+    후처리 방향을 중단하고 direct 4-class 학습으로 전환
 ```
 
 flex4_refine에서 pure 4M+4K top은 아래 후보였다.
@@ -698,6 +704,42 @@ validation target 대비 test recall은 50/70/80/90 policy에서 각각 약 19.0
 다음 단계는 현재 probability를 버리지 않고 subject/gap 경계를 지키는 causal moving-average/EMA로
 Deep 구간의 연속성을 사용해 ROC-AUC/AP와 recall-specificity tradeoff를 개선할 수 있는지 확인한다.
 
+Causal temporal Deep probability audit 결과, smoothing은 raw N3 probability를 개선하지 못했다.
+
+```text
+variant          test ROC-AUC  test AP
+raw              0.7362        0.1055
+causal mean 3    0.7311        0.1042
+causal mean 5    0.7282        0.1034
+causal mean 10   0.7234        0.1023
+EMA 0.20         0.7270        0.1038
+EMA 0.40         0.7306        0.1044
+EMA 0.60         0.7331        0.1049
+EMA 0.80         0.7350        0.1053
+```
+
+가장 가까운 EMA 0.80도 raw 대비 ROC-AUC -0.0012 (-0.17%), AP -0.0002 (-0.16%)로 낮았다.
+threshold 결과의 미세한 차이도 실질적인 개선으로 보지 않는다.
+
+```text
+recall-70 policy:
+raw F1 0.1728 / EMA 0.80 F1 0.1732 (+0.0004, +0.25%)
+
+recall-90 policy:
+raw F1 0.1499 / EMA 0.80 F1 0.1502 (+0.0003, +0.19%)
+raw onset/run recall 0.6826/0.7052
+EMA 0.80 onset/run recall 0.6872/0.7076
+```
+
+이 차이는 seed 변동보다 훨씬 작으며 EMA 0.80도 recall-70에서 test recall이 낮아지고, recall-90에서는
+specificity와 predicted-positive-rate가 소폭 나빠졌다. validation variant 선택도 recall-70/90에서
+3 seed 중 2 seed가 raw를 선택했다. 긴 mean/강한 smoothing은 Deep 진입 감지 지연을 늘리면서
+ranking까지 낮췄다. 따라서 현재 probability에 smoothing/hysteresis를 더 쌓는 방향은 중단한다.
+
+Deep 문제는 후처리보다 학습 표현과 목적함수 문제로 판단한다. 다음은 N1/N2를 loss 전에 Light로 합치는
+direct 4-class baseline을 실행하고, 그래도 Deep ranking/recall이 부족하면 N3-vs-rest binary specialist를
+별도 alarm veto 모델로 학습한다.
+
 ## 현재 코드 상태
 
 최근 추가된 핵심 스크립트:
@@ -775,6 +817,8 @@ same-split init ensemble은 기존 outer split을 바꾸지 않고, 각 role에 
 direct 4-class trainer는 원래 N1/N2 label을 loss 계산 전에 Light로 합치고 Wake/Light/Deep/REM 네 logits만
 학습한다. checkpoint도 validation `4 Macro F1 + 4 Kappa`로 선택한다. 기존 5-class trainer와 checkpoint는
 변경하지 않으며, direct 4-class 후보가 current best를 넘기 전까지 current best도 유지한다.
+direct4 summary에는 role/fusion별 Deep precision/recall과 outer 3-seed pooled 4-class confusion matrix도
+저장해 Deep→Light 및 Light→Deep 오답을 바로 확인할 수 있다.
 
 Deep probability audit는 same-split role ensemble NPZ를 재사용해 학습 없이 실행한다. 각 role과 current
 fusion의 N3-vs-non-N3 ROC-AUC/Average Precision을 측정하고, outer validation split에서 최대 F1 및
@@ -1077,59 +1121,61 @@ Colab 실행:
 우선순위 1:
 
 ```text
-current same-split ensemble best의 causal temporal Deep probability audit
+current four-role architecture의 direct 4-class training baseline
 ```
 
 목적:
 
 ```text
-raw N3 probability는 test ROC-AUC 0.7362로 분리 신호가 남아 있지만 calibration shift와 false positive가
-크다. Deep sleep은 연속 구간이므로 과거 epoch만 사용하는 causal mean/EMA가 일시적인 false positive를
-줄이고 validation-selected threshold의 test 일반화를 개선하는지 확인한다.
+기존 5-class 모델은 N1/N2를 따로 학습한 뒤 평가에서만 Light로 합친다. temporal smoothing도 Deep
+분리를 개선하지 못했으므로 N1/N2를 loss 전에 Light로 합치고 Wake/Light/Deep/REM을 직접 학습한다.
+불필요한 N1/N2 경계를 제거해 모델 용량과 gradient를 Light-vs-Deep 경계에 집중한다.
 ```
 
-재학습은 없다. 기존 same-split ensemble NPZ 12개(outer 3 x role 4)를 읽어 current best probability를
-재구성하며 subject 변경과 epoch gap에서 temporal history를 초기화한다.
+outer seed 42/7/123 x role 4개로 총 12개 모델을 학습한다. original/full_w20은 h64,
+capacity_h128/h128_ls003은 h128을 유지하고 ls003에만 label smoothing 0.03을 적용한다.
+checkpoint는 validation `4 Macro F1 + 4 Kappa`로 선택하며 기존 best weight를 4-class에 mapping해
+1차 fusion도 평가한다.
 
 Colab 실행:
 
 ```bash
 %cd /content/SSE
 !git pull
-!bash scripts/run_four_model_deep_temporal_probability_audit_colab.sh
+!bash scripts/run_four_model_direct_4class_colab.sh
 ```
 
 결과 summary JSON:
 
 ```text
-/content/drive/MyDrive/SSE_outputs/fusion4_same_split_init_ensemble_deep_temporal_probability_audit_context20_h64_summary.json
+/content/drive/MyDrive/SSE_outputs/fusion4_direct_4class_context20_summary.json
 ```
 
 비교 포인트:
 
 ```text
-1. raw 대비 causal mean 3/5/10 및 EMA 0.20/0.40/0.60/0.80의 test ROC-AUC/AP
-2. validation recall 70/80/90% threshold의 test precision/recall/specificity/F1
-3. predicted-positive-rate가 raw threshold보다 줄어드는지
-4. 각 seed validation에서 선택된 temporal variant가 test에서도 일반화되는지
-5. Deep run detection, 첫 epoch/첫 2 epoch recall, 최초 감지 지연
-6. 짧은 window와 긴 window 중 Deep 진입 지연 대비 false-positive 감소 tradeoff
+1. direct4 role별 단일 모델과 mapped-weight fusion의 3-seed 4M+4K
+2. benchmark best 대비 4M+4K 및 Wake+REM 절대/상대 변화율
+3. Light와 4K 개선 여부
+4. Deep F1/precision/recall과 Light→Deep, Deep→Light confusion
+5. 기존 best의 Deep F1 0.1000 및 pooled recall 0.1045보다 개선되는지
+6. 기존 선택 기준상 새 benchmark best 채택 여부
 ```
 
 결과에 따른 다음 분기:
 
 ```text
-temporal variant가 raw보다 안정적으로 개선됨:
-  best causal score에 hysteresis/min-duration/hold-time audit를 추가해 alarm Deep veto 후보를 확정한다.
+direct4가 benchmark best를 넘고 Deep도 개선:
+  direct4 fusion weight refinement 후 same-split multi-init ensemble로 확장한다.
 
-temporal smoothing이 ranking은 개선하지만 threshold 일반화가 부족함:
-  ensemble-specific Deep weight refinement 후 동일 temporal audit를 반복한다.
+direct4가 benchmark best는 못 넘지만 Deep이 크게 개선:
+  benchmark best와 alarm-oriented best를 분리하고 direct4 Deep specialist/fusion을 검토한다.
 
-temporal smoothing도 개선하지 못함:
-  direct 4-class baseline 및 N3-vs-rest binary specialist 학습으로 전환한다.
+direct4도 Deep을 개선하지 못함:
+  N3-vs-rest binary specialist를 여러 class-weight/sampler/init 설정으로 학습한다.
 ```
 
-후속 학습 후보인 direct 4-class baseline은 `scripts/run_four_model_direct_4class_colab.sh`로 이미 준비되어 있다.
+후속 binary specialist 기반 코드는 `src/sse_sleep/train_binary_specialist.py`에 준비되어 있다.
 
 ## 다음 채팅방 시작 프롬프트
 
@@ -1143,8 +1189,9 @@ classwise4_w_p0.72_c0.06_l0.00_li_p0.80_c0.02_l0.15_d_p0.82_c0.00_l0.18_rem_p0.0
 Deep probability audit에서 fusion test ROC-AUC 0.7362 / AP 0.1055로 신호는 남아 있지만,
 validation recall 90% threshold가 test recall 78.75% / specificity 55.45% / positive-rate 46.17%여서
 raw threshold는 alarm veto로 채택하지 않았다.
-다음 실험은 current ensemble의 causal temporal Deep probability audit다.
-Colab에서는 git pull 후 scripts/run_four_model_deep_temporal_probability_audit_colab.sh를 실행하면 돼.
-결과 summary JSON을 받으면 raw 대비 causal mean/EMA의 ROC-AUC/AP와 validation-selected threshold의
-test Deep precision/recall/specificity/F1을 분석하고 다음 Deep 개선 실험을 결정해줘.
+Causal temporal audit에서도 raw ROC-AUC/AP가 모든 mean/EMA보다 높아 후처리 방향을 중단했다.
+다음 실험은 current four-role architecture의 direct 4-class baseline이다.
+Colab에서는 git pull 후 scripts/run_four_model_direct_4class_colab.sh를 실행하면 돼.
+결과 summary JSON을 받으면 role별 direct4 모델과 mapped-weight fusion을 benchmark best 대비
+4M+4K, Wake+REM, Light/Deep으로 비교하고 새 best 및 다음 Deep 실험을 결정해줘.
 ```

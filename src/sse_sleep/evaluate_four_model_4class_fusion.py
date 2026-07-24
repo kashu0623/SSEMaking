@@ -45,7 +45,7 @@ def validate(reference: dict[str, np.ndarray], candidate: dict[str, np.ndarray],
             raise ValueError(f"Unaligned {key} for {role}")
 
 
-def summarize(y_true: np.ndarray, probabilities: np.ndarray) -> dict[str, float]:
+def summarize(y_true: np.ndarray, probabilities: np.ndarray) -> dict[str, Any]:
     prediction = probabilities.argmax(axis=1).astype(np.int64)
     metrics = asdict(evaluate(y_true.tolist(), prediction.tolist(), STAGE4_NAMES))
     return {
@@ -55,7 +55,11 @@ def summarize(y_true: np.ndarray, probabilities: np.ndarray) -> dict[str, float]
         "wake_f1": float(metrics["class_wise"]["Wake"]["f1"]),
         "light_f1": float(metrics["class_wise"]["Light"]["f1"]),
         "deep_f1": float(metrics["class_wise"]["Deep"]["f1"]),
+        "deep_precision": float(metrics["class_wise"]["Deep"]["precision"]),
+        "deep_recall": float(metrics["class_wise"]["Deep"]["recall"]),
+        "deep_support": int(metrics["class_wise"]["Deep"]["support"]),
         "rem_f1": float(metrics["class_wise"]["REM"]["f1"]),
+        "confusion_matrix": metrics["confusion_matrix"],
     }
 
 
@@ -89,13 +93,41 @@ def mean_std(values: Sequence[float]) -> dict[str, float]:
 
 
 def aggregate(seed_reports: Sequence[dict[str, Any]]) -> dict[str, Any]:
-    fields = ("4_macro_f1", "4_kappa", "4_macro_f1_plus_4_kappa", "wake_f1", "light_f1", "deep_f1", "rem_f1")
+    fields = (
+        "4_macro_f1",
+        "4_kappa",
+        "4_macro_f1_plus_4_kappa",
+        "wake_f1",
+        "light_f1",
+        "deep_f1",
+        "deep_precision",
+        "deep_recall",
+        "rem_f1",
+    )
     names = seed_reports[0]["candidates"].keys()
     return {
         name: {
             split: {
-                field: mean_std([report["candidates"][name][split][field] for report in seed_reports])
-                for field in fields
+                **{
+                    field: mean_std(
+                        [report["candidates"][name][split][field] for report in seed_reports]
+                    )
+                    for field in fields
+                },
+                "pooled_confusion_matrix": np.sum(
+                    [
+                        np.asarray(
+                            report["candidates"][name][split]["confusion_matrix"],
+                            dtype=np.int64,
+                        )
+                        for report in seed_reports
+                    ],
+                    axis=0,
+                ).tolist(),
+                "pooled_deep_support": sum(
+                    int(report["candidates"][name][split]["deep_support"])
+                    for report in seed_reports
+                ),
             }
             for split in ("val", "test")
         }
@@ -131,7 +163,9 @@ def main() -> None:
         print(
             f"{name}: 4M {test['4_macro_f1']['mean']:.4f} / 4K {test['4_kappa']['mean']:.4f} / "
             f"Wake {test['wake_f1']['mean']:.4f} / Light {test['light_f1']['mean']:.4f} / "
-            f"Deep {test['deep_f1']['mean']:.4f} / REM {test['rem_f1']['mean']:.4f}"
+            f"Deep {test['deep_f1']['mean']:.4f} "
+            f"(P {test['deep_precision']['mean']:.4f} / R {test['deep_recall']['mean']:.4f}) / "
+            f"REM {test['rem_f1']['mean']:.4f}"
         )
 
 
