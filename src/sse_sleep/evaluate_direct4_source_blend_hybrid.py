@@ -167,7 +167,12 @@ def choose_source_candidates(
         source_name(np.ones(4, dtype=np.float32)),
         *required_names,
     ):
-        selected.append(next(item for item in candidates if item["name"] == required_name))
+        match = next(
+            (item for item in candidates if item["name"] == required_name),
+            None,
+        )
+        if match is not None:
+            selected.append(match)
     unique: dict[str, dict[str, Any]] = {}
     for candidate in selected:
         unique[candidate["name"]] = candidate
