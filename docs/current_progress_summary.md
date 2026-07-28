@@ -33,7 +33,7 @@ PotchArousalCalculator:
 
 ```text
 current 4-role same-split ensemble + classwise-blended direct4 stage-wise hybrid
-source_w0.00_li0.00_d0.25_rem0.50__hybrid_w0.21_li0.52_d0.86_rem0.00_dg1.20
+source_w0.00_li0.00_d0.25_rem0.50__hybrid_w0.19_li0.54_d0.82_rem0.00_dg1.15
 ```
 
 사용 모델:
@@ -67,19 +67,19 @@ outer seed 42/7/123은 3-seed 평가용이며 동시에 합쳐 배포하는 모�
    REM: 0.50 single + 0.50 ensemble
 
 4. classwise-blended direct4 probability를 stage별로 hybrid한다.
-   Wake: 0.79375 current + 0.20625 direct4 source
-   Light: 0.475 current + 0.525 direct4 source
-   Deep: 0.1375 current + 0.8625 direct4 source, 이후 Deep score x 1.20
+   Wake: 0.8125 current + 0.1875 direct4 source
+   Light: 0.45625 current + 0.54375 direct4 source
+   Deep: 0.18125 current + 0.81875 direct4 source, 이후 Deep score x 1.15
    REM: 1.00 current + 0.00 direct4 source
 ```
 
 3-seed 평균:
 
 ```text
-4M 0.4388 / 4K 0.2800 / 4M+4K 0.7188
-Wake 0.5324 / Light 0.6697 / Deep 0.1773 / REM 0.3756
-Deep precision 0.2139 / Deep recall 0.1773
-Wake+REM 0.9080
+4M 0.4388 / 4K 0.2805 / 4M+4K 0.7193
+Wake 0.5324 / Light 0.6705 / Deep 0.1762 / REM 0.3760
+Deep precision 0.2154 / Deep recall 0.1740
+Wake+REM 0.9084
 ```
 
 ## 이전 기준 대비 향상
@@ -87,32 +87,33 @@ Wake+REM 0.9080
 이전 classwise source-blend best:
 
 ```text
-source_w0.00_li0.00_d0.25_rem0.50__hybrid_w0.20_li0.52_d0.77_rem0.00_dg1.15
-4M 0.4379 / 4K 0.2802 / 4M+4K 0.718172
-Wake 0.5323 / Light 0.6708 / Deep 0.1729 / REM 0.3757
-Wake+REM 0.9080
+source_w0.00_li0.00_d0.25_rem0.50__hybrid_w0.21_li0.52_d0.86_rem0.00_dg1.20
+4M 0.438758 / 4K 0.280000 / 4M+4K 0.718759
+Wake 0.532401 / Light 0.669733 / Deep 0.177270 / REM 0.375630
+Deep precision 0.213861 / Deep recall 0.177300 / Wake+REM 0.908030
 ```
 
 새 current best의 직전 best 대비 변화:
 
 ```text
-4M+4K +0.000587 (+0.0817%)
-4 Macro +0.000826 (+0.1886%)
-4 Kappa -0.000239 (-0.0854%)
-Wake +0.000139 (+0.0260%)
-Light -0.001060 (-0.1580%)
-Deep +0.004336 (+2.5074%)
-Deep precision +0.001690 (+0.7966%)
-Deep recall +0.006880 (+4.0371%)
-REM -0.000111 (-0.0294%)
-Wake+REM +0.000028 (+0.0031%)
+4M+4K +0.000562 (+0.0781%)
+4 Macro +0.000035 (+0.0081%)
+4 Kappa +0.000526 (+0.1880%)
+Wake +0.000014 (+0.0027%)
+Light +0.000797 (+0.1191%)
+Deep -0.001041 (-0.5871%)
+Deep precision +0.001515 (+0.7084%)
+Deep recall -0.003333 (-1.8796%)
+REM +0.000370 (+0.0986%)
+Wake+REM +0.000385 (+0.0424%)
 ```
 
-round4 pure top보다 4M+4K가 0.000204 낮아 tie band 안이고 Wake+REM이 더 높다.
-직전 best 대비 4M+4K와 Wake+REM이 모두 상승하고 Deep도 크게 회복돼 새 best로 채택한다.
-pooled Deep 정답은 `277 -> 287`, Deep→Light는 `1,195 -> 1,185`로 10개씩 개선됐다.
-Deep false positive는 `1,481 -> 1,553`으로 늘었지만 precision/recall/F1 평균은 모두
-상승했다. validation 4M+4K는 `0.670598 -> 0.670400`(-0.0296%)로 소폭 낮아졌다.
+round5의 pure 4M+4K top과 tie-rule selected가 같은 후보다. 총점과 Wake+REM이
+모두 상승했고 validation 4M+4K도 `0.670400 -> 0.671430`
+(+0.001030, +0.1536%)으로 상승해 명확한 새 best로 채택한다.
+pooled Deep 정답은 `287 -> 282`, Deep→Light는 `1,185 -> 1,190`으로 각각 5개
+악화됐지만 Deep false positive는 `1,553 -> 1,489`로 64개 감소해 precision은
+상승했다. static ridge는 여기서 종료하고 Light/Deep model-level specialist로 전환한다.
 
 ## 최근 실험 흐름
 
@@ -301,6 +302,15 @@ Deep false positive는 `1,481 -> 1,553`으로 늘었지만 precision/recall/F1 �
     pooled Deep 정답 +10, Deep→Light -10으로 동시에 회복
     총점 개선폭이 tie band를 넘고 Wake+REM도 상승해 selected를 새 best로 채택
     반 간격의 마지막 static ridge refinement round5로 전환
+
+33. direct4 classwise source blend + final hybrid ridge refinement round5
+    current best reference 4M+4K 0.718759를 정확히 재현
+    pure top과 tie-rule selected가 같은 w0.1875/li0.54375/d0.81875/gain1.15
+    4M 0.4388 / 4K 0.2805 / 4M+4K 0.7193 / Wake+REM 0.9084
+    직전 best 대비 4M+4K +0.0781%, 4K +0.1880%, Wake+REM +0.0424%
+    Light +0.1191%, Deep -0.5871%; validation 4M+4K +0.1536%
+    명확한 새 best로 채택하고 static ridge 탐색을 종료
+    Light-vs-Deep binary specialist의 conditional probability fusion으로 전환
 ```
 
 flex4_refine에서 pure 4M+4K top은 아래 후보였다.
@@ -1206,6 +1216,31 @@ Deep 0.1776, Wake+REM 0.907914다. selected와의 차이가 작으므로 round5�
 간격을 절반으로 줄여 세 ridge를 마지막으로 확인한다. 그 뒤에는 static grid를 중단하고
 Deep/Light specialist 학습 같은 모델 수준 변경으로 돌아간다.
 
+classwise source blend hybrid round5는 round4 best reference를 정확히 재현했고,
+pure top과 tie-rule selected가 같은 후보로 수렴했다.
+
+```text
+source_w0.00_li0.00_d0.25_rem0.50__hybrid_w0.19_li0.54_d0.82_rem0.00_dg1.15
+exact: w0.1875 / li0.54375 / d0.81875 / rem0 / gain1.15
+
+4M 0.438794 / 4K 0.280527 / 4M+4K 0.719320
+Wake 0.532415 / Light 0.670531 / Deep 0.176229 / REM 0.376000
+Deep precision 0.215376 / Deep recall 0.173968 / Wake+REM 0.908415
+validation 4M+4K 0.671430
+```
+
+직전 best 대비 4M+4K `+0.000562(+0.0781%)`, 4K `+0.000526(+0.1880%)`,
+Wake+REM `+0.000385(+0.0424%)`, validation `+0.001030(+0.1536%)`다.
+Light는 `+0.1191%`, Deep은 `-0.5871%`다. pooled Deep 정답은 5개 줄고
+Deep→Light는 5개 늘었지만 Deep false positive는 64개 감소했다. 총점, Wake+REM,
+validation이 모두 상승해 새 best로 채택하고 static hybrid ridge는 종료한다.
+
+결과:
+
+```text
+/Users/chan/Downloads/fusion4_direct4_classwise_source_blend_hybrid_round5_context20_h64_summary.json
+```
+
 ## 현재 코드 상태
 
 최근 추가된 핵심 스크립트:
@@ -1242,12 +1277,17 @@ scripts/run_direct4_classwise_source_blend_hybrid_round2_colab.sh
 scripts/run_direct4_classwise_source_blend_hybrid_round3_colab.sh
 scripts/run_direct4_classwise_source_blend_hybrid_round4_colab.sh
 scripts/run_direct4_classwise_source_blend_hybrid_round5_colab.sh
+scripts/run_light_deep_specialist_fusion_colab.sh
+src/sse_sleep/train_light_deep_specialist.py
+src/sse_sleep/evaluate_light_deep_specialist_fusion.py
 ```
 
 기능:
 
 ```text
 Light(N1/N2)와 Deep(N3)을 분리해서 4-model flexible fusion weight를 탐색한다.
+Light-vs-Deep specialist를 별도로 학습하고 current best의 Light+Deep 총질량 안에서
+calibrated P(Deep | Light 또는 Deep)만 blend한다.
 ```
 
 평가기는 아래 옵션을 지원하도록 확장되어 있다.
@@ -1600,32 +1640,33 @@ Colab 실행:
 우선순위 1:
 
 ```text
-direct4 classwise source blend + final hybrid ridge refinement round5
+Light-vs-Deep binary specialist conditional fusion
 ```
 
 목적:
 
 ```text
-round4 selected, pure top, tie-band Deep top이 같은 source를 사용한다.
-source를 고정하고 round4 간격을 절반으로 줄여 세 후보 사이를 마지막으로 탐색한다.
-selected의 w0.20625/li0.525/d0.8625/gain1.20, pure top의
-w0.18125/li0.55/d0.8125/gain1.15, Deep top의
-w0.20625/li0.525/d0.875/gain1.1875를 모두 정확히 포함한다.
+실제 Deep의 76.56%를 Light로 오분류하는 병목을 모델 학습 단계에서 직접 겨냥한다.
+true Light/Deep epoch만 사용해 P(Deep | Light 또는 Deep)를 학습한다.
+현재 best의 Wake/REM probability와 Light+Deep 총질량은 그대로 보존하고,
+Light/Deep 내부 조건부 확률만 specialist와 blend한다.
 ```
 
-grid:
+학습/융합 범위:
 
 ```text
-source ensemble beta 고정:
-  Wake 0.00 / Light 0.00 / Deep 0.25 / REM 0.50
+feature:
+  original temporal / full-w20
 
-hybrid:
-  Wake alpha 0.18125~0.23125, 간격 0.00625
-  Light alpha 0.5125~0.55, 간격 0.00625
-  Deep alpha 0.8125~0.8875, 간격 0.00625
-  REM alpha 0.00
-  Deep gain 1.15~1.2125, 간격 0.00625
-  총 9,009개 + baseline
+specialist:
+  h64 CE / h128 CE / h128 focal gamma 1.0
+  각 outer split 42/7/123에서 총 18개 specialist checkpoint
+
+conditional fusion:
+  beta 0.05~1.00
+  calibration scale 0.50~2.00
+  calibration bias -2.00~0.50
+  beta=0 current round5 best를 별도 baseline으로 정확히 포함
 ```
 
 Colab 실행:
@@ -1633,27 +1674,28 @@ Colab 실행:
 ```bash
 %cd /content/SSE
 !git pull
-!bash scripts/run_direct4_classwise_source_blend_hybrid_round5_colab.sh
+!bash scripts/run_light_deep_specialist_fusion_colab.sh
 ```
 
 결과 summary JSON:
 
 ```text
-/content/drive/MyDrive/SSE_outputs/fusion4_direct4_classwise_source_blend_hybrid_round5_context20_h64_summary.json
+/content/drive/MyDrive/SSE_outputs/fusion4_light_deep_specialist_fusion_context20_summary.json
 ```
 
 비교 포인트:
 
 ```text
-1. current_best_reference가 4M+4K 0.718759를 정확히 재현하는지
-2. 반 간격 grid에서 pure top/selected/tie-band Deep top 사이 최적점
+1. current_best_reference가 4M+4K 0.719320을 정확히 재현하는지
+2. original과 full-w20 specialist 중 어느 feature/loss/capacity가 우세한지
 3. pure top과 0.0005 tie-rule selected 후보
 4. current best 대비 모든 metric의 절대/상대 변화율
-5. Deep precision/recall/F1과 pooled Deep 정답 및 Deep→Light 변화
+5. Deep precision/recall/F1, pooled Deep 정답, Deep→Light, Light→Deep 변화
+6. validation과 test가 같은 방향으로 움직이는지
 ```
 
-현재 best와 round5 후보는 outer split 하나당 current 24 checkpoints + direct4 6
-checkpoints로 총 30 checkpoints다.
+현재 best는 outer split 하나당 30 checkpoints다. specialist 후보는 여기에
+Light/Deep checkpoint 1개를 추가한 31-checkpoint inference다.
 
 ## 다음 채팅방 시작 프롬프트
 
@@ -1661,12 +1703,15 @@ checkpoints로 총 30 checkpoints다.
 docs/current_progress_summary.md를 읽고 이어서 진행해줘.
 현재 목표는 비용 무시, 성능-only fixed/flexible fusion 개선이야.
 현재 best는 24-checkpoint current ensemble + classwise-blended direct4 6 checkpoints:
-source_w0.00_li0.00_d0.25_rem0.50__hybrid_w0.21_li0.52_d0.86_rem0.00_dg1.20
-3-seed 평균은 4M 0.4388 / 4K 0.2800 / 4M+4K 0.7188,
-Wake 0.5324 / Light 0.6697 / Deep 0.1773 / REM 0.3756 / Wake+REM 0.9080이다.
-직전 best 대비 4M+4K +0.0817%, Deep +2.5074%, Wake+REM +0.0031%다.
-다음 실험은 마지막 static hybrid ridge refinement round5다.
-Colab에서는 git pull 후 scripts/run_direct4_classwise_source_blend_hybrid_round5_colab.sh를 실행하면 돼.
-결과 summary JSON을 받으면 current best 정확 재현, source beta/hybrid alpha, pure top/tie-rule
-selected, current best 대비 모든 metric과 Deep confusion 변화를 비교하고 다음 방향을 결정해줘.
+source_w0.00_li0.00_d0.25_rem0.50__hybrid_w0.19_li0.54_d0.82_rem0.00_dg1.15
+exact hybrid alpha는 Wake 0.1875 / Light 0.54375 / Deep 0.81875 / REM 0,
+Deep gain 1.15다.
+3-seed 평균은 4M 0.4388 / 4K 0.2805 / 4M+4K 0.7193,
+Wake 0.5324 / Light 0.6705 / Deep 0.1762 / REM 0.3760 / Wake+REM 0.9084다.
+직전 best 대비 4M+4K +0.0781%, Deep -0.5871%, Wake+REM +0.0424%다.
+다음 실험은 Light-vs-Deep binary specialist conditional fusion이다.
+Colab에서는 git pull 후 scripts/run_light_deep_specialist_fusion_colab.sh를 실행하면 돼.
+결과 JSON을 받으면 current best 정확 재현, feature/loss/capacity별 specialist,
+pure top/tie-rule selected, current best 대비 모든 metric과 Light/Deep confusion 변화를
+비교하고 새 best 및 다음 방향을 결정해줘.
 ```
