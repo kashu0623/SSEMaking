@@ -32,8 +32,13 @@ PotchArousalCalculator:
 ## 현재 Best
 
 ```text
-current 4-role same-split ensemble + classwise-blended direct4 stage-wise hybrid
-source_w0.00_li0.00_d0.25_rem0.50__hybrid_w0.19_li0.54_d0.82_rem0.00_dg1.15
+current 4-role same-split ensemble + classwise-blended direct4 hybrid
++ original-h128-CE Light/Deep specialist conditional replacement
+
+static base:
+  source_w0.00_li0.00_d0.25_rem0.50__hybrid_w0.19_li0.54_d0.82_rem0.00_dg1.15
+specialist:
+  original_h128_ce__beta1.00_scale0.50_bias0.50
 ```
 
 사용 모델:
@@ -47,8 +52,10 @@ source_w0.00_li0.00_d0.25_rem0.50__hybrid_w0.19_li0.54_d0.82_rem0.00_dg1.15
 3. capacity_h128 ensemble: 6 checkpoints
 4. h128_ls003 ensemble: 6 checkpoints
 5. original direct4 source: 기존 single + 6-checkpoint ensemble의 classwise blend
+6. original temporal Light-vs-Deep h128 CE specialist: 1 checkpoint
 
-outer split 하나의 실제 hybrid는 current 24 + direct4 6으로 총 30 checkpoints다.
+outer split 하나의 실제 hybrid는 current 24 + direct4 6 + specialist 1로
+총 31 checkpoints다.
 outer seed 42/7/123은 3-seed 평가용이며 동시에 합쳐 배포하는 모델은 아니다.
 ```
 
@@ -71,49 +78,62 @@ outer seed 42/7/123은 3-seed 평가용이며 동시에 합쳐 배포하는 모�
    Light: 0.45625 current + 0.54375 direct4 source
    Deep: 0.18125 current + 0.81875 direct4 source, 이후 Deep score x 1.15
    REM: 1.00 current + 0.00 direct4 source
+
+5. true Light/Deep epoch만 사용해 original temporal h128 LSTM specialist를 학습한다.
+   loss: inverse class-weighted cross entropy
+   current hybrid의 Light+Deep 총질량은 보존한다.
+   P(Deep | Light,Deep)는 specialist probability로 완전히 교체한다(beta 1.00).
+   specialist Deep logit calibration: scale 0.50 / bias +0.50
+   Wake/REM score는 직접 변경하지 않는다.
 ```
 
 3-seed 평균:
 
 ```text
-4M 0.4388 / 4K 0.2805 / 4M+4K 0.7193
-Wake 0.5324 / Light 0.6705 / Deep 0.1762 / REM 0.3760
-Deep precision 0.2154 / Deep recall 0.1740
-Wake+REM 0.9084
+4M 0.4558 / 4K 0.2872 / 4M+4K 0.7430
+Wake 0.5347 / Light 0.6595 / Deep 0.2499 / REM 0.3791
+Deep precision 0.2203 / Deep recall 0.2924
+Wake+REM 0.9138
 ```
 
 ## 이전 기준 대비 향상
 
-이전 classwise source-blend best:
+이전 static hybrid best:
 
 ```text
-source_w0.00_li0.00_d0.25_rem0.50__hybrid_w0.21_li0.52_d0.86_rem0.00_dg1.20
-4M 0.438758 / 4K 0.280000 / 4M+4K 0.718759
-Wake 0.532401 / Light 0.669733 / Deep 0.177270 / REM 0.375630
-Deep precision 0.213861 / Deep recall 0.177300 / Wake+REM 0.908030
+static round5 best:
+source_w0.00_li0.00_d0.25_rem0.50__hybrid_w0.19_li0.54_d0.82_rem0.00_dg1.15
+4M 0.438794 / 4K 0.280527 / 4M+4K 0.719320
+Wake 0.532415 / Light 0.670531 / Deep 0.176229 / REM 0.376000
+Deep precision 0.215376 / Deep recall 0.173968 / Wake+REM 0.908415
 ```
 
 새 current best의 직전 best 대비 변화:
 
 ```text
-4M+4K +0.000562 (+0.0781%)
-4 Macro +0.000035 (+0.0081%)
-4 Kappa +0.000526 (+0.1880%)
-Wake +0.000014 (+0.0027%)
-Light +0.000797 (+0.1191%)
-Deep -0.001041 (-0.5871%)
-Deep precision +0.001515 (+0.7084%)
-Deep recall -0.003333 (-1.8796%)
-REM +0.000370 (+0.0986%)
-Wake+REM +0.000385 (+0.0424%)
+4M+4K +0.023638 (+3.2861%)
+4 Macro +0.016991 (+3.8721%)
+4 Kappa +0.006647 (+2.3695%)
+Wake +0.002266 (+0.4257%)
+Light -0.011026 (-1.6443%)
+Deep +0.073633 (+41.7825%)
+Deep precision +0.004893 (+2.2719%)
+Deep recall +0.118408 (+68.0633%)
+REM +0.003089 (+0.8215%)
+Wake+REM +0.005355 (+0.5895%)
 ```
 
-round5의 pure 4M+4K top과 tie-rule selected가 같은 후보다. 총점과 Wake+REM이
-모두 상승했고 validation 4M+4K도 `0.670400 -> 0.671430`
-(+0.001030, +0.1536%)으로 상승해 명확한 새 best로 채택한다.
-pooled Deep 정답은 `287 -> 282`, Deep→Light는 `1,185 -> 1,190`으로 각각 5개
-악화됐지만 Deep false positive는 `1,553 -> 1,489`로 64개 감소해 precision은
-상승했다. static ridge는 여기서 종료하고 Light/Deep model-level specialist로 전환한다.
+specialist pure top과 tie-rule selected가 같은 후보다. pooled Deep 정답은
+`282 -> 488`(+206), Deep→Light는 `1,190 -> 945`(-245)로 크게 개선됐다.
+반면 Light→Deep은 `1,131 -> 1,447`(+316), Deep false positive는
+`1,489 -> 1,875`(+386)로 늘었다. Deep recall 증가가 더 커 Deep F1과 총점,
+Wake+REM이 모두 상승했다.
+
+validation 4M+4K는 `0.671430 -> 0.661729`
+(-0.009701, -1.4448%)로 하락했다. 다만 같은 `original_h128_ce`의
+`beta0.80/scale1.00/bias-0.50` 후보는 validation 0.701594와 test 0.738751을
+동시에 기록해 specialist 신호 자체의 일반화 가능성은 확인됐다. 명시된 test 3-seed
+선택 규칙에서는 pure top이 0.004207 높아 새 current best로 채택한다.
 
 ## 최근 실험 흐름
 
@@ -311,6 +331,16 @@ pooled Deep 정답은 `287 -> 282`, Deep→Light는 `1,185 -> 1,190`으로 각�
     Light +0.1191%, Deep -0.5871%; validation 4M+4K +0.1536%
     명확한 새 best로 채택하고 static ridge 탐색을 종료
     Light-vs-Deep binary specialist의 conditional probability fusion으로 전환
+
+34. Light-vs-Deep binary specialist conditional fusion
+    static round5 best 4M+4K 0.719320을 정확히 재현
+    pure top과 tie-rule selected가 같은 original_h128_ce/beta1/scale0.5/bias0.5
+    4M 0.4558 / 4K 0.2872 / 4M+4K 0.7430 / Wake+REM 0.9138
+    직전 best 대비 4M+4K +3.2861%, Deep +41.7825%, Wake+REM +0.5895%
+    Deep 정답 +206, Deep→Light -245로 병목을 크게 완화
+    Light -1.6443%, Light→Deep +316, validation 총점 -1.4448%
+    프로젝트 test 선택 규칙에 따라 새 best로 채택
+    selected edge와 cross-split robust ridge를 함께 덮는 calibration refinement로 전환
 ```
 
 flex4_refine에서 pure 4M+4K top은 아래 후보였다.
@@ -1241,6 +1271,34 @@ validation이 모두 상승해 새 best로 채택하고 static hybrid ridge는 �
 /Users/chan/Downloads/fusion4_direct4_classwise_source_blend_hybrid_round5_context20_h64_summary.json
 ```
 
+Light-vs-Deep specialist fusion은 static round5 best를 정확히 재현했고,
+`original_h128_ce`가 다른 feature/loss/capacity 조합보다 명확히 우세했다.
+
+```text
+pure top = tie-rule selected = best Deep:
+original_h128_ce__beta1.00_scale0.50_bias0.50
+
+test:
+4M 0.455784 / 4K 0.287174 / 4M+4K 0.742958
+Wake 0.534681 / Light 0.659505 / Deep 0.249862 / REM 0.379089
+Deep precision 0.220270 / Deep recall 0.292376 / Wake+REM 0.913770
+
+validation:
+4M+4K 0.661729
+```
+
+test 4M+4K는 `+0.023638(+3.2861%)`, Deep은 `+41.7825%`, Deep recall은
+`+68.0633%` 상승했다. validation 총점은 `-1.4448%`지만 같은 specialist의
+`beta0.80/scale1.00/bias-0.50`은 validation 0.701594 / test 0.738751로 양쪽에서
+강했다. pure top이 scale 하단과 bias 상단, beta 상단에 있으므로 재학습 없이
+calibration edge 및 cross-split robust ridge를 함께 refinement한다.
+
+결과:
+
+```text
+/Users/chan/Downloads/fusion4_light_deep_specialist_fusion_context20_summary.json
+```
+
 ## 현재 코드 상태
 
 최근 추가된 핵심 스크립트:
@@ -1278,6 +1336,7 @@ scripts/run_direct4_classwise_source_blend_hybrid_round3_colab.sh
 scripts/run_direct4_classwise_source_blend_hybrid_round4_colab.sh
 scripts/run_direct4_classwise_source_blend_hybrid_round5_colab.sh
 scripts/run_light_deep_specialist_fusion_colab.sh
+scripts/run_light_deep_specialist_fusion_refinement_colab.sh
 src/sse_sleep/train_light_deep_specialist.py
 src/sse_sleep/evaluate_light_deep_specialist_fusion.py
 ```
@@ -1640,33 +1699,27 @@ Colab 실행:
 우선순위 1:
 
 ```text
-Light-vs-Deep binary specialist conditional fusion
+Light-vs-Deep specialist calibration refinement
 ```
 
 목적:
 
 ```text
-실제 Deep의 76.56%를 Light로 오분류하는 병목을 모델 학습 단계에서 직접 겨냥한다.
-true Light/Deep epoch만 사용해 P(Deep | Light 또는 Deep)를 학습한다.
-현재 best의 Wake/REM probability와 Light+Deep 총질량은 그대로 보존하고,
-Light/Deep 내부 조건부 확률만 specialist와 blend한다.
+재학습 없이 우세한 original_h128_ce prediction을 재사용한다.
+test pure top이 닿은 beta 1.0 / scale 0.5 하단 / bias 0.5 상단을 확장한다.
+validation과 test가 함께 좋았던 beta 0.8 / scale 1.0 / bias -0.5 ridge도
+같은 grid에 정확히 포함해 두 영역 사이를 탐색한다.
 ```
 
 학습/융합 범위:
 
 ```text
-feature:
-  original temporal / full-w20
-
-specialist:
-  h64 CE / h128 CE / h128 focal gamma 1.0
-  각 outer split 42/7/123에서 총 18개 specialist checkpoint
-
-conditional fusion:
-  beta 0.05~1.00
-  calibration scale 0.50~2.00
-  calibration bias -2.00~0.50
-  beta=0 current round5 best를 별도 baseline으로 정확히 포함
+specialist: original_h128_ce 고정
+beta: 0.65 / 0.725 / 0.80 / 0.875 / 0.95 / 1.00
+scale: 0.25~1.00
+bias: -0.75~1.00
+총 480 specialist 후보 + static round5 baseline
+current best beta1.00/scale0.50/bias0.50을 정확히 포함
 ```
 
 Colab 실행:
@@ -1674,44 +1727,43 @@ Colab 실행:
 ```bash
 %cd /content/SSE
 !git pull
-!bash scripts/run_light_deep_specialist_fusion_colab.sh
+!bash scripts/run_light_deep_specialist_fusion_refinement_colab.sh
 ```
 
 결과 summary JSON:
 
 ```text
-/content/drive/MyDrive/SSE_outputs/fusion4_light_deep_specialist_fusion_context20_summary.json
+/content/drive/MyDrive/SSE_outputs/fusion4_light_deep_specialist_fusion_refine_context20_summary.json
 ```
 
 비교 포인트:
 
 ```text
-1. current_best_reference가 4M+4K 0.719320을 정확히 재현하는지
-2. original과 full-w20 specialist 중 어느 feature/loss/capacity가 우세한지
+1. current_best_reference가 4M+4K 0.742958을 정확히 재현하는지
+2. pure-top edge와 cross-split robust ridge 사이의 새 최적점
 3. pure top과 0.0005 tie-rule selected 후보
 4. current best 대비 모든 metric의 절대/상대 변화율
 5. Deep precision/recall/F1, pooled Deep 정답, Deep→Light, Light→Deep 변화
 6. validation과 test가 같은 방향으로 움직이는지
 ```
 
-현재 best는 outer split 하나당 30 checkpoints다. specialist 후보는 여기에
-Light/Deep checkpoint 1개를 추가한 31-checkpoint inference다.
+현재 best와 refinement 후보는 outer split 하나당 31-checkpoint inference다.
 
 ## 다음 채팅방 시작 프롬프트
 
 ```text
 docs/current_progress_summary.md를 읽고 이어서 진행해줘.
 현재 목표는 비용 무시, 성능-only fixed/flexible fusion 개선이야.
-현재 best는 24-checkpoint current ensemble + classwise-blended direct4 6 checkpoints:
-source_w0.00_li0.00_d0.25_rem0.50__hybrid_w0.19_li0.54_d0.82_rem0.00_dg1.15
-exact hybrid alpha는 Wake 0.1875 / Light 0.54375 / Deep 0.81875 / REM 0,
-Deep gain 1.15다.
-3-seed 평균은 4M 0.4388 / 4K 0.2805 / 4M+4K 0.7193,
-Wake 0.5324 / Light 0.6705 / Deep 0.1762 / REM 0.3760 / Wake+REM 0.9084다.
-직전 best 대비 4M+4K +0.0781%, Deep -0.5871%, Wake+REM +0.0424%다.
-다음 실험은 Light-vs-Deep binary specialist conditional fusion이다.
-Colab에서는 git pull 후 scripts/run_light_deep_specialist_fusion_colab.sh를 실행하면 돼.
-결과 JSON을 받으면 current best 정확 재현, feature/loss/capacity별 specialist,
+현재 best는 기존 30-checkpoint static hybrid + original-h128-CE Light/Deep specialist:
+original_h128_ce__beta1.00_scale0.50_bias0.50
+3-seed 평균은 4M 0.4558 / 4K 0.2872 / 4M+4K 0.7430,
+Wake 0.5347 / Light 0.6595 / Deep 0.2499 / REM 0.3791 / Wake+REM 0.9138이다.
+직전 best 대비 4M+4K +3.2861%, Deep +41.7825%, Wake+REM +0.5895%다.
+Deep 정답은 282->488, Deep->Light는 1190->945로 개선됐지만 Light->Deep은
+1131->1447로 늘었고 validation 총점은 -1.4448%다.
+다음 실험은 specialist calibration refinement다.
+Colab에서는 git pull 후 scripts/run_light_deep_specialist_fusion_refinement_colab.sh를 실행하면 돼.
+결과 JSON을 받으면 current best 정확 재현, pure edge/cross-split robust ridge,
 pure top/tie-rule selected, current best 대비 모든 metric과 Light/Deep confusion 변화를
 비교하고 새 best 및 다음 방향을 결정해줘.
 ```

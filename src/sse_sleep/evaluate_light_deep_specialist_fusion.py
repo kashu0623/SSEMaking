@@ -142,7 +142,7 @@ def evaluate_reference(seed_data: Sequence[dict[str, Any]]) -> dict[str, Any]:
             )
         reports.append(report)
     return {
-        "name": "current_best_reference",
+        "name": "static_round5_reference",
         "specialist": None,
         "beta": 0.0,
         "scale": 1.0,
@@ -221,6 +221,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--biases", default=None)
     parser.add_argument("--tie-band", type=float, default=0.0005)
     parser.add_argument("--archive-top", type=int, default=60)
+    parser.add_argument("--reference-specialist-label", default=None)
+    parser.add_argument("--reference-beta", type=float, default=None)
+    parser.add_argument("--reference-scale", type=float, default=None)
+    parser.add_argument("--reference-bias", type=float, default=None)
     parser.add_argument("--out-json", type=Path, required=True)
     return parser.parse_args()
 
@@ -302,8 +306,8 @@ def main() -> None:
     if any(scale <= 0.0 for scale in scales):
         raise ValueError("Calibration scales must be positive")
 
-    current_best_reference = evaluate_reference(seed_data)
-    candidates = [current_best_reference]
+    static_round5_reference = evaluate_reference(seed_data)
+    candidates = [static_round5_reference]
     for specialist_label, specialist_data in specialists.items():
         for beta, scale, bias in itertools.product(betas, scales, biases):
             candidates.append(
@@ -317,6 +321,38 @@ def main() -> None:
                 )
             )
 
+    reference_values = (
+        args.reference_beta,
+        args.reference_scale,
+        args.reference_bias,
+    )
+    if args.reference_specialist_label is None:
+        if any(value is not None for value in reference_values):
+            raise ValueError(
+                "Reference beta/scale/bias require --reference-specialist-label"
+            )
+        current_best_reference = static_round5_reference
+    else:
+        if any(value is None for value in reference_values):
+            raise ValueError(
+                "Specialist reference requires beta, scale, and bias"
+            )
+        current_best_reference = next(
+            (
+                candidate
+                for candidate in candidates
+                if candidate["specialist"] == args.reference_specialist_label
+                and np.isclose(candidate["beta"], args.reference_beta)
+                and np.isclose(candidate["scale"], args.reference_scale)
+                and np.isclose(candidate["bias"], args.reference_bias)
+            ),
+            None,
+        )
+        if current_best_reference is None:
+            raise ValueError(
+                "Specialist current-best reference is not present in the grid"
+            )
+
     selections = select_candidates(candidates, args.tie_band)
     score_key = lambda item: item["test"]["4_macro_f1_plus_4_kappa"]["mean"]
     deep_key = lambda item: item["test"]["deep_f1"]["mean"]
@@ -325,6 +361,7 @@ def main() -> None:
         *sorted(candidates, key=score_key, reverse=True)[: args.archive_top],
         *sorted(candidates, key=deep_key, reverse=True)[: args.archive_top],
         *sorted(candidates, key=wake_rem_key, reverse=True)[: args.archive_top],
+        static_round5_reference,
         current_best_reference,
         selections["pure_top"],
         selections["selected_by_project_rule"],
@@ -336,10 +373,16 @@ def main() -> None:
         "experiment": "light_deep_specialist_conditional_fusion",
         "stage_names": list(STAGE4_NAMES),
         "method": {
-            "current_best": {
+            "static_round5": {
                 "source_betas": CURRENT_SOURCE_BETAS.tolist(),
                 "hybrid_alphas": CURRENT_HYBRID_ALPHAS.tolist(),
                 "deep_gain": CURRENT_DEEP_GAIN,
+            },
+            "current_best_reference": {
+                "specialist": current_best_reference["specialist"],
+                "beta": current_best_reference["beta"],
+                "scale": current_best_reference["scale"],
+                "bias": current_best_reference["bias"],
             },
             "fusion": (
                 "Preserve current Light+Deep mass; blend calibrated specialist "
@@ -357,6 +400,7 @@ def main() -> None:
             "bias": [float(value) for value in biases],
         },
         "candidate_count": len(candidates),
+        "static_round5_reference": static_round5_reference,
         "current_best_reference": current_best_reference,
         "selections": selections,
         "archived_candidates": list(archived.values()),
