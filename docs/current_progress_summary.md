@@ -38,7 +38,8 @@ current 4-role same-split ensemble + classwise-blended direct4 hybrid
 static base:
   source_w0.00_li0.00_d0.25_rem0.50__hybrid_w0.19_li0.54_d0.82_rem0.00_dg1.15
 specialist:
-  blend_a0600__beta1.00_scale0.75_bias0.25
+  blend_a0600__beta0.97_scale0.75_bias0.25
+  exact beta: 0.975
   exact blend: 0.40 original-h128-CE + 0.60 Light-h256-2layer-CE
 ```
 
@@ -86,7 +87,8 @@ outer seed 42/7/123은 3-seed 평가용이며 동시에 합쳐 배포하는 모�
    member 2: h256 2-layer LSTM / inverse class-weighted CE
    member probability: 0.40 h128 + 0.60 h256
    current hybrid의 Light+Deep 총질량은 보존한다.
-   P(Deep | Light,Deep)는 blended specialist probability로 완전히 교체한다(beta 1.00).
+   P(Deep | Light,Deep)는 current score와 blended specialist probability를
+   beta 0.975로 결합한다.
    blended Deep logit calibration: scale 0.75 / bias +0.25
    Wake/REM score는 직접 변경하지 않는다.
 ```
@@ -94,10 +96,10 @@ outer seed 42/7/123은 3-seed 평가용이며 동시에 합쳐 배포하는 모�
 3-seed 평균:
 
 ```text
-4M 0.4574 / 4K 0.2915 / 4M+4K 0.7489
-Wake 0.5355 / Light 0.6714 / Deep 0.2479 / REM 0.3749
-Deep precision 0.2529 / Deep recall 0.2559
-Wake+REM 0.9104
+4M 0.4572 / 4K 0.2917 / 4M+4K 0.7489
+Wake 0.5356 / Light 0.6719 / Deep 0.2463 / REM 0.3751
+Deep precision 0.2531 / Deep recall 0.2526
+Wake+REM 0.9107
 ```
 
 ## 이전 기준 대비 향상
@@ -105,37 +107,38 @@ Wake+REM 0.9104
 직전 current best:
 
 ```text
-single__beta1.00_scale0.54_bias0.25
-exact scale 0.5375
-4M 0.455120 / 4K 0.289828 / 4M+4K 0.744948
-Wake 0.533355 / Light 0.670579 / Deep 0.236444 / REM 0.380103
-Deep precision 0.232019 / Deep recall 0.244902 / Wake+REM 0.913458
+blend_a0600__beta1.00_scale0.75_bias0.25
+4M 0.457428 / 4K 0.291478 / 4M+4K 0.748906
+Wake 0.535473 / Light 0.671380 / Deep 0.247912 / REM 0.374946
+Deep precision 0.252908 / Deep recall 0.255870 / Wake+REM 0.910419
 ```
 
 새 current best의 직전 best 대비 변화:
 
 ```text
-4M+4K +0.003958 (+0.5313%)
-4 Macro +0.002308 (+0.5071%)
-4 Kappa +0.001650 (+0.5693%)
-Wake +0.002118 (+0.3971%)
-Light +0.000801 (+0.1195%)
-Deep +0.011468 (+4.8504%)
-Deep precision +0.020889 (+9.0029%)
-Deep recall +0.010968 (+4.4785%)
-REM -0.005157 (-1.3567%)
-Wake+REM -0.003039 (-0.3327%)
+4M+4K -0.000028 (-0.0037%)
+4 Macro -0.000206 (-0.0451%)
+4 Kappa +0.000178 (+0.0611%)
+Wake +0.000086 (+0.0160%)
+Light +0.000529 (+0.0789%)
+Deep -0.001597 (-0.6443%)
+Deep precision +0.000160 (+0.0632%)
+Deep recall -0.003221 (-1.2587%)
+REM +0.000158 (+0.0421%)
+Wake+REM +0.000243 (+0.0267%)
 ```
 
-pair blend pure top, tie-rule selected, tie-band Deep top이 모두 같은 후보다.
-직전 best와 총점 차이가 `+0.003958`로 tie band를 크게 넘으므로 Wake+REM
-하락과 무관하게 새 current best로 채택한다.
+refinement pure top과 tie-band Deep top은
+`blend_a0600__beta1.00_scale0.78_bias0.25`(exact scale 0.775)이며,
+4M+4K `0.749230`이다. tie-rule selected는 pure top보다 총점이
+`0.000352` 낮지만 Wake+REM이 `0.000580` 높다.
 
-pooled Deep 정답은 `404 -> 433`(+29), Deep→Light는 `1,035 -> 1,018`(-17),
-Light→Deep은 `1,153 -> 1,094`(-59), Deep false positive는
-`1,515 -> 1,393`(-122)로 모두 개선됐다. validation 4M+4K도
-`0.681499 -> 0.686747`(+0.005247, +0.7700%)로 상승했고 validation Deep은
-`+12.3256%`다. test/validation 동시 개선이므로 pair-blend ridge를 refinement한다.
+selected는 직전 best보다도 총점이 `0.000028` 낮아 tie band 안이고
+Wake+REM이 `0.000243` 높으므로 프로젝트 규칙에 따라 새 current best로 채택한다.
+pooled Deep 정답은 `433 -> 427`(-6), Deep→Light는 `1,018 -> 1,024`(+6),
+Light→Deep은 `1,094 -> 1,081`(-13), Deep false positive는
+`1,393 -> 1,378`(-15)다. validation 4M+4K는
+`0.686747 -> 0.686888`(+0.000141, +0.0205%)이다.
 
 ## 최근 실험 흐름
 
@@ -402,6 +405,19 @@ Light→Deep은 `1,153 -> 1,094`(-59), Deep false positive는
     Deep 정답 +29, Deep→Light -17, Light→Deep -59, Deep false positive -122
     validation 4M+4K도 +0.7700%로 test와 함께 개선되어 새 best 채택
     alpha 0.60과 calibration 주변의 pair-blend fine refinement로 전환
+
+41. Light-vs-Deep h128+h256 pairwise specialist blend refinement
+    current best 4M+4K 0.748906을 정확히 재현
+    pure top/tie-band Deep top은 alpha0.60/beta1.00/scale0.775/bias0.25
+    pure top 4M+4K 0.749230, 직전 best 대비 +0.0433%
+    tie-rule selected는 alpha0.60/beta0.975/scale0.75/bias0.25
+    selected는 pure top 대비 총점 -0.000352, Wake+REM +0.000580
+    직전 best 대비 4M+4K -0.0037%, Wake+REM +0.0267%
+    4K +0.0611%, Light +0.0789%, REM +0.0421%
+    Deep -0.6443%, precision +0.0632%, recall -1.2587%
+    Deep 정답 -6, Deep→Light +6, Light→Deep -13, Deep false positive -15
+    validation 4M+4K +0.0205%
+    tie 규칙에 따라 selected를 새 best로 채택하고 두 경쟁점 주변 round2로 전환
 ```
 
 flex4_refine에서 pure 4M+4K top은 아래 후보였다.
@@ -1574,6 +1590,51 @@ beta/scale/bias 주변을 더 촘촘히 탐색한다.
 /Users/chan/Downloads/fusion4_light_deep_h128_h256_pair_blend_context20_summary.json
 ```
 
+pair-blend refinement는 current best를 정확히 재현했다. 2,917개 후보의
+pure top과 tie-band Deep top은 같고, tie-rule selected는 별도 후보다.
+
+```text
+pure top / tie-band Deep top:
+blend_a0600__beta1.00_scale0.78_bias0.25
+exact scale 0.775
+4M 0.457566 / 4K 0.291664 / 4M+4K 0.749230
+Wake 0.535150 / Light 0.672245 / Deep 0.247937 / REM 0.374933
+Deep precision 0.254194 / Deep recall 0.254796 / Wake+REM 0.910083
+validation 4M+4K 0.687713
+
+tie-rule selected:
+blend_a0600__beta0.97_scale0.75_bias0.25
+exact beta 0.975
+4M 0.457222 / 4K 0.291656 / 4M+4K 0.748878
+Wake 0.535559 / Light 0.671910 / Deep 0.246315 / REM 0.375104
+Deep precision 0.253068 / Deep recall 0.252649 / Wake+REM 0.910663
+validation 4M+4K 0.686888
+```
+
+selected는 pure top보다 4M+4K가 `0.000352` 낮아 tie band 안이고,
+Wake+REM은 `0.000580` 높다. 직전 best와 비교해도 4M+4K는
+`-0.000028(-0.0037%)`로 tie band 안이고 Wake+REM은
+`+0.000243(+0.0267%)` 높으므로 프로젝트 규칙에 따라 새 best로 채택한다.
+
+직전 best 대비 selected의 4K는 `+0.0611%`, Wake는 `+0.0160%`,
+Light는 `+0.0789%`, REM은 `+0.0421%`, Deep precision은 `+0.0632%`다.
+반면 4M은 `-0.0451%`, Deep은 `-0.6443%`, Deep recall은 `-1.2587%`다.
+pooled Deep 정답은 `433 -> 427`(-6), Deep→Light는
+`1,018 -> 1,024`(+6), Light→Deep은 `1,094 -> 1,081`(-13),
+Deep false positive는 `1,393 -> 1,378`(-15)다. validation 총점은
+`+0.000141(+0.0205%)`다.
+
+pure top은 직전 best 대비 총점 `+0.000324(+0.0433%)`, validation 총점
+`+0.1406%`, Deep `+0.0098%`지만 Wake+REM은 `-0.0370%`다.
+alpha 0.60이 다시 최적 source였고 두 경쟁점 모두 calibration 내부에 있으므로,
+alpha 0.575~0.625와 beta/scale/bias 주변을 한 번 더 미세 탐색한다.
+
+결과:
+
+```text
+/Users/chan/Downloads/fusion4_light_deep_h128_h256_pair_blend_refine_context20_summary.json
+```
+
 ## 현재 코드 상태
 
 최근 추가된 핵심 스크립트:
@@ -1618,6 +1679,7 @@ scripts/run_light_deep_specialist_oof_stacking_colab.sh
 scripts/run_light_deep_n2n3_specialist_colab.sh
 scripts/run_light_deep_h128_h256_pair_blend_colab.sh
 scripts/run_light_deep_h128_h256_pair_blend_refinement_colab.sh
+scripts/run_light_deep_h128_h256_pair_blend_refinement_round2_colab.sh
 src/sse_sleep/train_light_deep_specialist.py
 src/sse_sleep/evaluate_light_deep_specialist_fusion.py
 src/sse_sleep/average_light_deep_specialist_ensemble.py
@@ -1985,16 +2047,16 @@ Colab 실행:
 우선순위 1:
 
 ```text
-Light-vs-Deep h128+h256 pairwise specialist blend refinement
+Light-vs-Deep h128+h256 pairwise specialist blend refinement round2
 ```
 
 목적:
 
 ```text
-새 best의 h256 alpha 0.60 주변에서 더 좋은 architecture blend 비율을 찾는다.
-beta1.00/scale0.75/bias0.25 주변 calibration을 촘촘히 탐색한다.
-test와 validation에서 함께 개선된 Deep precision/recall 균형을 유지한다.
-REM과 Wake+REM 하락을 줄이면서 4M+4K와 Deep을 추가 개선할 수 있는지 확인한다.
+tie-rule selected alpha0.60/beta0.975/scale0.75/bias0.25와
+pure top alpha0.60/beta1.00/scale0.775/bias0.25 사이를 미세 탐색한다.
+4M+4K를 유지하거나 높이면서 Wake+REM 우위를 더 확보한다.
+selected에서 소폭 후퇴한 Deep/recall을 회복할 수 있는지 확인한다.
 ```
 
 학습/융합 범위:
@@ -2003,12 +2065,12 @@ REM과 Wake+REM 하락을 줄이면서 4M+4K와 Deep을 추가 개선할 수 있
 outer seed: 42 / 7 / 123
 member 1: current original h128 1-layer inverse CE
 member 2: Light-vs-Deep h256 2-layer inverse CE
-h256 alpha: 0.50 / 0.525 / 0.55 / 0.575 / 0.60 / 0.625 / 0.65 / 0.675 / 0.70
-beta: 0.90 / 0.95 / 0.975 / 1.00
-scale: 0.60 / 0.65 / 0.70 / 0.725 / 0.75 / 0.775 / 0.80 / 0.85 / 0.90
-bias: 0.05 / 0.10 / 0.15 / 0.20 / 0.25 / 0.30 / 0.35 / 0.40 / 0.45
-총 2,916 specialist 후보 + static round5 baseline
-current best alpha0.60/beta1.00/scale0.75/bias0.25를 정확히 포함
+h256 alpha: 0.575~0.625, 0.005 간격
+beta: 0.95 / 0.96 / 0.975 / 0.98 / 0.99 / 1.00
+scale: 0.72 / 0.73 / 0.74 / 0.75 / 0.76 / 0.77 / 0.775 / 0.79 / 0.80
+bias: 0.20 / 0.225 / 0.25 / 0.275 / 0.30
+총 2,970 specialist 후보 + static round5 baseline
+current selected와 previous pure top을 모두 정확히 포함
 ```
 
 Colab 실행:
@@ -2016,20 +2078,20 @@ Colab 실행:
 ```bash
 %cd /content/SSE
 !git pull
-!bash scripts/run_light_deep_h128_h256_pair_blend_refinement_colab.sh
+!bash scripts/run_light_deep_h128_h256_pair_blend_refinement_round2_colab.sh
 ```
 
 결과 summary JSON:
 
 ```text
-/content/drive/MyDrive/SSE_outputs/fusion4_light_deep_h128_h256_pair_blend_refine_context20_summary.json
+/content/drive/MyDrive/SSE_outputs/fusion4_light_deep_h128_h256_pair_blend_refine_round2_context20_summary.json
 ```
 
 비교 포인트:
 
 ```text
-1. current_best_reference가 4M+4K 0.748906을 정확히 재현하는지
-2. alpha 0.60 주변 source-selected 성능과 최적 blend 비율
+1. current_best_reference가 selected 4M+4K 0.748878을 정확히 재현하는지
+2. alpha 0.60 주변의 최적 blend 비율과 ridge 폭
 3. pure top과 0.0005 tie-rule selected 후보
 4. current best 대비 모든 metric의 절대/상대 변화율
 5. Deep precision/recall/F1, pooled Deep 정답, Deep→Light 변화
@@ -2045,18 +2107,19 @@ Colab 실행:
 docs/current_progress_summary.md를 읽고 이어서 진행해줘.
 현재 목표는 비용 무시, 성능-only fixed/flexible fusion 개선이야.
 현재 best는 기존 30-checkpoint static hybrid + h128/h256 Light/Deep specialists:
-blend_a0600__beta1.00_scale0.75_bias0.25
+blend_a0600__beta0.97_scale0.75_bias0.25
+exact beta는 0.975다.
 member probability는 0.40 original-h128-CE + 0.60 Light-h256-2layer-CE다.
 outer split 하나당 총 32 checkpoints다.
-3-seed 평균은 4M 0.4574 / 4K 0.2915 / 4M+4K 0.7489,
-Wake 0.5355 / Light 0.6714 / Deep 0.2479 / REM 0.3749 / Wake+REM 0.9104다.
-직전 best 대비 4M+4K +0.5313%, Deep +4.8504%, Deep precision +9.0029%,
-Deep recall +4.4785%, Wake+REM -0.3327%다.
-pair blend pure top/selected/tie-band Deep top은 모두 새 best와 같고,
-validation 4M+4K도 +0.7700% 개선됐다.
-다음 실험은 alpha0.60/beta1.00/scale0.75/bias0.25 주변 pair-blend refinement다.
+3-seed 평균은 4M 0.4572 / 4K 0.2917 / 4M+4K 0.7489,
+Wake 0.5356 / Light 0.6719 / Deep 0.2463 / REM 0.3751 / Wake+REM 0.9107다.
+직전 best 대비 4M+4K -0.0037%, Wake+REM +0.0267%라 tie 규칙으로 채택했다.
+Deep은 -0.6443%, precision은 +0.0632%, recall은 -1.2587%다.
+pure top은 beta1.00/scale0.775로 4M+4K 0.749230이지만
+selected보다 Wake+REM이 0.000580 낮다.
+다음 실험은 두 경쟁점 주변 pair-blend refinement round2다.
 Colab에서는 git pull 후
-scripts/run_light_deep_h128_h256_pair_blend_refinement_colab.sh를 실행하면 돼.
+scripts/run_light_deep_h128_h256_pair_blend_refinement_round2_colab.sh를 실행하면 돼.
 결과 JSON을 받으면 current best 정확 재현, alpha별 source,
 pure top/tie-rule selected, current best 대비 모든 metric의 절대/상대 변화율과
 Light/Deep confusion 및 REM/Wake+REM 변화를 비교하고 새 best 및 다음 방향을 결정해줘.
