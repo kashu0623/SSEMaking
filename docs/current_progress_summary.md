@@ -369,6 +369,15 @@ pooled Deep 정답은 `401 -> 404`(+3), Deep→Light는 `1,040 -> 1,035`(-5)로
     ensemble6 Deep precision +20.2701%지만 recall -35.3643%, Deep F1 -20.6251%
     단순 probability average가 약한 replica에 끌려가므로 새 best 채택 없음
     single을 보존하며 replica를 학습 가중하는 subject-OOF logistic stacking으로 전환
+
+38. Light-vs-Deep specialist subject-OOF logistic stacking
+    current best 4M+4K 0.744948을 정확히 재현
+    5,587개 후보의 pure top/selected/tie-band Deep top이 모두 기존 single
+    best stack none/C0.003도 4M+4K 0.720798, current 대비 -3.2418%
+    best stack Deep precision +12.5231%지만 recall -36.8518%, Deep F1 -22.2464%
+    OOF validation도 -12.5716%로 test와 같은 하락 방향
+    weak replica의 상보 신호를 stacking으로 회수하지 못해 새 best 채택 없음
+    실제 N3 오답의 핵심인 N2/N3 hard boundary를 직접 학습하는 specialist로 전환
 ```
 
 flex4_refine에서 pure 4M+4K top은 아래 후보였다.
@@ -1424,6 +1433,37 @@ single의 강한 신호를 보존하면서 replica의 상보적 신호만 가중
 /Users/chan/Downloads/fusion4_light_deep_specialist_same_split_init_ensemble_context20_summary.json
 ```
 
+Light-vs-Deep specialist subject-OOF logistic stacking도 current best를 정확히
+재현했지만, 5,587개 전체 후보의 pure top, tie-rule selected,
+best Deep within tie band는 다시 모두 기존 single specialist였다.
+
+```text
+best OOF stack:
+stack_none_c0.003__beta0.80_scale0.54_bias1.00
+4M 0.438731 / 4K 0.282067 / 4M+4K 0.720798
+Wake 0.537058 / Light 0.650419 / Deep 0.183843 / REM 0.383605
+Deep precision 0.261075 / Deep recall 0.154651
+Wake+REM 0.920663 / OOF validation 0.595824
+```
+
+current 대비 4M+4K는 `-0.024150(-3.2418%)`, Deep은 `-22.2464%`,
+OOF validation은 `-12.5716%`다. Wake+REM은 `+0.7887%`, Deep precision은
+`+12.5231%`지만 Deep recall이 `-36.8518%`로 무너졌다. pooled Deep 정답은
+`404 -> 252`(-152), Deep→Light는 `1,035 -> 1,172`(+137)이다.
+Light→Deep과 Deep false positive는 각각 `1,153 -> 774`(-379),
+`1,515 -> 1,021`(-494)로 줄었지만, multi-init average와 마찬가지로 Deep을
+지나치게 보수적으로 판정했다.
+
+강한 single을 포함해도 모든 OOF stack이 current와 큰 차이로 뒤졌고 validation/test가
+같은 하락 방향이므로 replica 결합 계열은 종료한다. 다음은 실제 N3 오답의 63.74%를
+차지한 N2 경계를 직접 겨냥해 N1을 제외한 N2-vs-N3 specialist를 학습한다.
+
+결과:
+
+```text
+/Users/chan/Downloads/fusion4_light_deep_specialist_oof_stacking_context20_summary.json
+```
+
 ## 현재 코드 상태
 
 최근 추가된 핵심 스크립트:
@@ -1465,6 +1505,7 @@ scripts/run_light_deep_specialist_fusion_refinement_colab.sh
 scripts/run_light_deep_specialist_fusion_refinement_round2_colab.sh
 scripts/run_light_deep_specialist_same_split_init_ensemble_colab.sh
 scripts/run_light_deep_specialist_oof_stacking_colab.sh
+scripts/run_light_deep_n2n3_specialist_colab.sh
 src/sse_sleep/train_light_deep_specialist.py
 src/sse_sleep/evaluate_light_deep_specialist_fusion.py
 src/sse_sleep/average_light_deep_specialist_ensemble.py
@@ -1477,6 +1518,7 @@ src/sse_sleep/stack_light_deep_specialists.py
 Light(N1/N2)와 Deep(N3)을 분리해서 4-model flexible fusion weight를 탐색한다.
 Light-vs-Deep specialist를 별도로 학습하고 current best의 Light+Deep 총질량 안에서
 calibrated P(Deep | Light 또는 Deep)만 blend한다.
+specialist trainer는 Light-vs-Deep과 N2-vs-N3 negative mode, LSTM/GRU를 지원한다.
 specialist evaluator는 global selection과 source별 selection을 함께 archive한다.
 ```
 
@@ -1830,32 +1872,37 @@ Colab 실행:
 우선순위 1:
 
 ```text
-Light-vs-Deep specialist subject-OOF logistic stacking
+N2-vs-N3 hard-boundary specialist
 ```
 
 목적:
 
 ```text
-기존 single + initialization replica 5개의 P(Deep)를 feature로 사용한다.
-outer split별 validation subject 5-fold OOF로 L2 logistic stacker를 학습한다.
-single을 우선 보존하면서 약한 replica는 자동으로 낮은/음의 weight를 받게 한다.
-OOF val probability와 full-val-fit test probability를 같은 fusion grid에서 비교한다.
+현재 specialist는 N1+N2를 Light negative로 함께 학습한다.
+실제 N3 오답의 63.74%인 N2를 hard negative로 집중 학습하기 위해 N1을 제외한다.
+N2-vs-N3에서 class weighting, capacity, layer, recurrent cell을 비교한다.
+Light-vs-Deep h256/2-layer와 sqrt-weight control도 함께 평가해 원인을 분리한다.
 ```
 
 학습/융합 범위:
 
 ```text
 outer seed: 42 / 7 / 123
-stack members: 기존 single + init1001/2002/3003/4004/5005
-features: 각 member의 Deep probability/logit + mean/std/min/max
-OOF: validation subject 5-fold
-L2 logistic C: 0.001~10.0, 9개
-class weight: none / balanced
-source: 기존 single + 18개 OOF stack
+feature/context: original temporal / context20
+N2-vs-N3:
+  h128 inverse/sqrt/none CE
+  h256 inverse CE
+  h128/h256 2-layer inverse CE
+  h128 GRU inverse CE
+  h128 inverse CE + label smoothing 0.03
+Light-vs-Deep controls:
+  h256 2-layer inverse CE
+  h128 sqrt CE
+source: 기존 single + 새 specialist 10종
 beta: 0.50~1.00
 scale: 0.25~1.50, current 0.5375 포함
 bias: -1.00~1.00, current 0.25 포함
-총 5,586 specialist 후보 + static round5 baseline
+총 3,234 specialist 후보 + static round5 baseline
 current best single/beta1.00/scale0.5375/bias0.25를 정확히 포함
 ```
 
@@ -1864,28 +1911,29 @@ Colab 실행:
 ```bash
 %cd /content/SSE
 !git pull
-!bash scripts/run_light_deep_specialist_oof_stacking_colab.sh
+!bash scripts/run_light_deep_n2n3_specialist_colab.sh
 ```
 
 결과 summary JSON:
 
 ```text
-/content/drive/MyDrive/SSE_outputs/fusion4_light_deep_specialist_oof_stacking_context20_summary.json
+/content/drive/MyDrive/SSE_outputs/fusion4_light_deep_n2n3_specialist_context20_summary.json
 ```
 
 비교 포인트:
 
 ```text
 1. current_best_reference가 4M+4K 0.744948을 정확히 재현하는지
-2. single과 OOF stack 18개 중 우세 source/C/class weight
+2. N2-vs-N3와 Light-vs-Deep control 중 우세 source
 3. pure top과 0.0005 tie-rule selected 후보
 4. current best 대비 모든 metric의 절대/상대 변화율
-5. Deep precision/recall/F1, pooled Deep 정답, Deep→Light, Light→Deep 변화
-6. OOF validation과 test가 같은 방향으로 움직이는지
+5. Deep precision/recall/F1, pooled Deep 정답, Deep→Light/N1/REM 변화
+6. Light→Deep과 N1→Deep 증가 여부
+7. validation과 test가 같은 방향으로 움직이는지
 ```
 
 현재 best는 outer split 하나당 31-checkpoint inference다.
-stack 후보는 specialist 6개를 사용하므로 총 36 checkpoints다.
+새 specialist 후보도 outer split 하나당 총 31 checkpoints다.
 
 ## 다음 채팅방 시작 프롬프트
 
@@ -1901,9 +1949,11 @@ Wake 0.5334 / Light 0.6706 / Deep 0.2364 / REM 0.3801 / Wake+REM 0.9135다.
 validation 총점은 -0.0865%다.
 same-split multi-init의 pure top/selected는 기존 single이라 current best는 유지한다.
 ensemble6 top은 current 대비 4M+4K -2.9066%, Deep -20.6251%였다.
-다음 실험은 specialist subject-OOF logistic stacking이다.
-Colab에서는 git pull 후 scripts/run_light_deep_specialist_oof_stacking_colab.sh를 실행하면 돼.
-결과 JSON을 받으면 current best 정확 재현, single/OOF-stack source,
+OOF stacking의 best stack도 current 대비 4M+4K -3.2418%, Deep -22.2464%였다.
+replica 결합 계열은 종료한다.
+다음 실험은 N2-vs-N3 hard-boundary specialist다.
+Colab에서는 git pull 후 scripts/run_light_deep_n2n3_specialist_colab.sh를 실행하면 돼.
+결과 JSON을 받으면 current best 정확 재현, N2-vs-N3/Light control source,
 pure top/tie-rule selected, current best 대비 모든 metric과 Light/Deep confusion 변화를
 비교하고 새 best 및 다음 방향을 결정해줘.
 ```

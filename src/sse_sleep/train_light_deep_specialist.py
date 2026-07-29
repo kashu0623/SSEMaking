@@ -11,7 +11,7 @@ import numpy as np
 import torch
 from torch import nn
 
-from .labels import merge_many_5_to_4
+from .labels import STAGE5_TO_ID, merge_many_5_to_4
 from .train_lstm import (
     RecurrentSleepClassifier,
     json_ready,
@@ -40,6 +40,22 @@ def light_deep_subset(
 ) -> tuple[np.ndarray, np.ndarray]:
     mask = (labels_4 == 1) | (labels_4 == 2)
     return features[mask], (labels_4[mask] == 2).astype(np.int64)
+
+
+def specialist_subset(
+    features: np.ndarray,
+    labels_5: np.ndarray,
+    labels_4: np.ndarray,
+    negative_mode: str,
+) -> tuple[np.ndarray, np.ndarray]:
+    if negative_mode == "light":
+        return light_deep_subset(features, labels_4)
+    if negative_mode == "n2_only":
+        n2_id = STAGE5_TO_ID["N2"]
+        n3_id = STAGE5_TO_ID["N3"]
+        mask = (labels_5 == n2_id) | (labels_5 == n3_id)
+        return features[mask], (labels_5[mask] == n3_id).astype(np.int64)
+    raise ValueError(f"Unknown negative mode: {negative_mode}")
 
 
 def binary_class_weights(y_train: np.ndarray, mode: str) -> torch.Tensor | None:
@@ -176,6 +192,8 @@ def train_light_deep_specialist(
     loss_type: str,
     focal_gamma: float,
     label_smoothing: float,
+    negative_mode: str,
+    model_type: str,
 ) -> dict[str, Any]:
     set_seed(seed)
     arrays = load_npz(npz_path)
@@ -183,12 +201,18 @@ def train_light_deep_specialist(
         split: arrays[f"X_{split}"].astype(np.float32)
         for split in ("train", "val", "test")
     }
-    labels_4 = {
-        split: map_labels(arrays[f"y_{split}"])
+    labels_5 = {
+        split: arrays[f"y_{split}"].astype(np.int64)
         for split in ("train", "val", "test")
     }
+    labels_4 = {split: map_labels(labels_5[split]) for split in labels_5}
     subsets = {
-        split: light_deep_subset(features[split], labels_4[split])
+        split: specialist_subset(
+            features[split],
+            labels_5[split],
+            labels_4[split],
+            negative_mode,
+        )
         for split in ("train", "val", "test")
     }
 
@@ -199,7 +223,7 @@ def train_light_deep_specialist(
         num_layers=num_layers,
         num_classes=2,
         dropout=dropout,
-        model_type="lstm",
+        model_type=model_type,
         aux_head="none",
     ).to(device)
     weights = binary_class_weights(subsets["train"][1], class_weight_mode)
@@ -265,9 +289,13 @@ def train_light_deep_specialist(
                     "num_layers": num_layers,
                     "num_classes": 2,
                     "dropout": dropout,
-                    "model_type": "lstm",
+                    "model_type": model_type,
                     "stage_names": BINARY_NAMES,
-                    "label_mode": "light_vs_deep",
+                    "label_mode": (
+                        "n2_vs_n3"
+                        if negative_mode == "n2_only"
+                        else "light_vs_deep"
+                    ),
                 },
                 checkpoint_path,
             )
@@ -311,6 +339,8 @@ def train_light_deep_specialist(
             "loss_type": loss_type,
             "focal_gamma": focal_gamma,
             "label_smoothing": label_smoothing,
+            "negative_mode": negative_mode,
+            "model_type": model_type,
         },
         "class_counts": np.bincount(subsets["train"][1], minlength=2).tolist(),
         "class_weights": None if weights is None else weights.tolist(),
@@ -371,6 +401,16 @@ def main() -> None:
     )
     parser.add_argument("--focal-gamma", type=float, default=1.0)
     parser.add_argument("--label-smoothing", type=float, default=0.0)
+    parser.add_argument(
+        "--negative-mode",
+        choices=("light", "n2_only"),
+        default="light",
+    )
+    parser.add_argument(
+        "--model-type",
+        choices=("lstm", "gru"),
+        default="lstm",
+    )
     args = parser.parse_args()
     report = train_light_deep_specialist(
         args.npz,
@@ -388,6 +428,8 @@ def main() -> None:
         args.loss_type,
         args.focal_gamma,
         args.label_smoothing,
+        args.negative_mode,
+        args.model_type,
     )
     print(
         json.dumps(
