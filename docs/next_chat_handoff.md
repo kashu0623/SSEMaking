@@ -9,7 +9,7 @@ docs/current_progress_summary.md를 읽고 이어서 진행해줘.
 4-class fusion refinement는 잠시 멈추고 앱 목적 중심 Light-vs-rest 트랙을 시작했어.
 비용, 모델 수, 추론량은 무시하고 성능만 본다.
 
-기존 4-class best는 기존 30-checkpoint static hybrid + h128/h256 specialists:
+기존 4-class best는 기존 30-checkpoint static hybrid + specialist 2개:
 blend_a0600__beta0.97_scale0.75_bias0.25
 exact beta는 0.975다.
 
@@ -26,20 +26,21 @@ Light precision 0.702532 / recall 0.643752 / Deep→Light 0.607715
 
 direct Light-vs-rest best는 Light F1 +11.6937%, recall +43.0780%였지만
 binary Kappa -36.4450%, precision -9.8794%, Deep→Light +55.4688%라 채택하지 않았다.
-validation Deep 누출 제한도 test에서 모두 초과해 단독 binary/multitask는 unsafe했다.
+Deep-veto selected도 Light F1 +1.8440%, recall +10.3812%였지만
+objective -5.6238%, Kappa -26.7569%, precision -6.0831%,
+Deep→Light +15.9180%라 채택하지 않았다.
+alpha=1 경계, global best gamma=0으로 post-hoc veto 상보성도 없었다.
 
-다음은 direct Light probability를 proposal로 쓰고 current
-P(Deep|Light,Deep)를 explicit veto로 적용하는 audit다.
-validation Deep→Light를 current baseline 0.528169 이하로 제한한 뒤
-그 안에서 Light objective가 가장 높은 후보를 선택한다.
+다음은 Other(Wake+REM)/Light/Deep 3-class primary objective를 직접 학습한다.
+Deep을 독립 출력으로 강제하고 P(Light)를 기존 앱 binary 지표로 평가한다.
 
 Colab 실행:
 %cd /content/SSE
 !git pull
-!bash scripts/run_light_alarm_deep_veto_fusion_colab.sh
+!bash scripts/run_light_alarm_3class_colab.sh
 
-결과 summary JSON을 받으면 current Deep 누출 constraint 내 selected, safe profile,
-baseline 대비 모든 metric 변화, alpha/gamma ridge, validation-test constraint 이전을
-비교하고 앱용 새 best와 다음 방향을 정한 뒤
+결과 summary JSON을 받으면 selected와 safe profiles를 current argmax baseline 대비
+objective/F1/Kappa/precision/recall 및 Wake/Deep/REM→Light 변화로 비교하고
+앱용 새 best와 다음 방향을 정한 뒤
 docs/current_progress_summary.md를 갱신해줘.
 ```
