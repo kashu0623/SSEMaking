@@ -27,15 +27,19 @@ Wake 0.5334 / Light 0.6706 / Deep 0.2364 / REM 0.3801 / Wake+REM 0.9135
 직전 best 대비 4M+4K +0.0324%, Deep +0.2026%, Wake+REM +0.0677%이며
 validation 총점은 -0.0865%다.
 
-다음 실험은 Light-vs-Deep specialist same-split multi-init ensemble이야.
-기존 single, initialization replica 5개 각각, 6-checkpoint ensemble을 비교한다.
+same-split multi-init의 pure top/selected는 기존 single이라 current best는 유지한다.
+ensemble6 top은 current 대비 4M+4K -2.9066%, Deep -20.6251%였다.
+
+다음 실험은 Light-vs-Deep specialist subject-OOF logistic stacking이야.
+기존 single과 initialization replica 5개의 probability/logit을 validation subject
+5-fold OOF로 학습하고 C/class-weight를 비교한다.
 
 Colab 실행:
 %cd /content/SSE
 !git pull
-!bash scripts/run_light_deep_specialist_same_split_init_ensemble_colab.sh
+!bash scripts/run_light_deep_specialist_oof_stacking_colab.sh
 
-결과 summary JSON을 받으면 current best 정확 재현, single/init별/ensemble6 source,
+결과 summary JSON을 받으면 current best 정확 재현, single/OOF-stack source,
 pure top/tie-rule selected, current best 대비 모든 metric의 절대/상대 변화율과
 Light/Deep confusion 변화를 비교하고 새 best 및 다음 방향을 정한 뒤
 docs/current_progress_summary.md를 갱신해줘.

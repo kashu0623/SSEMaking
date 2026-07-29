@@ -360,6 +360,15 @@ pooled Deep 정답은 `401 -> 404`(+3), Deep→Light는 `1,040 -> 1,035`(-5)로
     Deep 정답 +3, Deep→Light -5, validation 총점 -0.0865%
     프로젝트 규칙에 따라 selected를 새 best로 채택
     calibration 포화로 종료하고 specialist same-split multi-init ensemble로 전환
+
+37. Light-vs-Deep specialist same-split multi-init ensemble
+    current best 4M+4K 0.744948을 정확히 재현
+    pure top, tie-rule selected, tie-band Deep top이 모두 기존 single current best
+    가장 나은 새 init2002 후보도 4M+4K 0.730053, current 대비 -1.9995%
+    ensemble6 top은 4M+4K 0.723296, current 대비 -2.9066%
+    ensemble6 Deep precision +20.2701%지만 recall -35.3643%, Deep F1 -20.6251%
+    단순 probability average가 약한 replica에 끌려가므로 새 best 채택 없음
+    single을 보존하며 replica를 학습 가중하는 subject-OOF logistic stacking으로 전환
 ```
 
 flex4_refine에서 pure 4M+4K top은 아래 후보였다.
@@ -1374,6 +1383,47 @@ probability ensemble을 시험한다.
 /Users/chan/Downloads/fusion4_light_deep_specialist_fusion_refine_round2_context20_summary.json
 ```
 
+Light-vs-Deep specialist same-split multi-init ensemble은 current best를 정확히
+재현했지만, 2,059개 전체 후보의 pure top, tie-rule selected,
+best Deep within tie band가 모두 기존 single specialist였다.
+
+```text
+current best:
+single__beta1.00_scale0.54_bias0.25
+4M 0.455120 / 4K 0.289828 / 4M+4K 0.744948
+Deep 0.236444 / Wake+REM 0.913458 / validation 0.681499
+
+best new initialization:
+init2002__beta0.95_scale0.25_bias0.00
+4M 0.446990 / 4K 0.283063 / 4M+4K 0.730053
+Deep 0.225530 / Wake+REM 0.923423 / validation 0.632429
+
+ensemble6 top:
+ensemble6__beta0.95_scale0.25_bias0.00
+4M 0.439792 / 4K 0.283504 / 4M+4K 0.723296
+Deep 0.187677 / Wake+REM 0.921416 / validation 0.652547
+```
+
+best new initialization은 current 대비 총점 `-0.014895(-1.9995%)`, Deep
+`-4.6159%`, validation `-7.2003%`다. ensemble6는 총점
+`-0.021652(-2.9066%)`, Deep `-20.6251%`, validation `-4.2483%`다.
+ensemble6의 Deep precision은 `+20.2701%`지만 recall이 `-35.3643%`로
+무너져 Deep 정답이 `404 -> 260`(-144)으로 줄었다. Light→Deep은
+`1,153 -> 798`(-355), Deep false positive는 `1,515 -> 1,021`(-494)로
+감소했지만 지나치게 보수적인 Deep 판정 때문에 전체 성능이 하락했다.
+
+전체 Deep F1 top은 기존 single의 다른 calibration으로 Deep이
+`0.236444 -> 0.259586`(+9.7877%)였지만 4M+4K가
+`0.744948 -> 0.726153`(-2.5230%)이라 tie band 밖이다. 따라서 current best는
+유지한다. 단순 평균은 중단하고, validation subject OOF logistic stacking으로
+single의 강한 신호를 보존하면서 replica의 상보적 신호만 가중 학습한다.
+
+결과:
+
+```text
+/Users/chan/Downloads/fusion4_light_deep_specialist_same_split_init_ensemble_context20_summary.json
+```
+
 ## 현재 코드 상태
 
 최근 추가된 핵심 스크립트:
@@ -1414,9 +1464,11 @@ scripts/run_light_deep_specialist_fusion_colab.sh
 scripts/run_light_deep_specialist_fusion_refinement_colab.sh
 scripts/run_light_deep_specialist_fusion_refinement_round2_colab.sh
 scripts/run_light_deep_specialist_same_split_init_ensemble_colab.sh
+scripts/run_light_deep_specialist_oof_stacking_colab.sh
 src/sse_sleep/train_light_deep_specialist.py
 src/sse_sleep/evaluate_light_deep_specialist_fusion.py
 src/sse_sleep/average_light_deep_specialist_ensemble.py
+src/sse_sleep/stack_light_deep_specialists.py
 ```
 
 기능:
@@ -1425,6 +1477,7 @@ src/sse_sleep/average_light_deep_specialist_ensemble.py
 Light(N1/N2)와 Deep(N3)을 분리해서 4-model flexible fusion weight를 탐색한다.
 Light-vs-Deep specialist를 별도로 학습하고 current best의 Light+Deep 총질량 안에서
 calibrated P(Deep | Light 또는 Deep)만 blend한다.
+specialist evaluator는 global selection과 source별 selection을 함께 archive한다.
 ```
 
 평가기는 아래 옵션을 지원하도록 확장되어 있다.
@@ -1777,29 +1830,32 @@ Colab 실행:
 우선순위 1:
 
 ```text
-Light-vs-Deep specialist same-split multi-init ensemble
+Light-vs-Deep specialist subject-OOF logistic stacking
 ```
 
 목적:
 
 ```text
-outer split마다 기존 original_h128_ce specialist와 같은 구조/loss의
-initialization replica 5개를 추가 학습한다.
-기존 single, replica 각각, 6-checkpoint probability ensemble을 모두 비교한다.
-각 specialist source마다 conditional fusion calibration을 다시 탐색한다.
+기존 single + initialization replica 5개의 P(Deep)를 feature로 사용한다.
+outer split별 validation subject 5-fold OOF로 L2 logistic stacker를 학습한다.
+single을 우선 보존하면서 약한 replica는 자동으로 낮은/음의 weight를 받게 한다.
+OOF val probability와 full-val-fit test probability를 같은 fusion grid에서 비교한다.
 ```
 
 학습/융합 범위:
 
 ```text
-architecture: original temporal / h128 / inverse-weighted CE
 outer seed: 42 / 7 / 123
-new init seed: 1001 / 2002 / 3003 / 4004 / 5005
-source: 기존 single / init별 single 5개 / ensemble6
+stack members: 기존 single + init1001/2002/3003/4004/5005
+features: 각 member의 Deep probability/logit + mean/std/min/max
+OOF: validation subject 5-fold
+L2 logistic C: 0.001~10.0, 9개
+class weight: none / balanced
+source: 기존 single + 18개 OOF stack
 beta: 0.50~1.00
 scale: 0.25~1.50, current 0.5375 포함
 bias: -1.00~1.00, current 0.25 포함
-총 2,058 specialist 후보 + static round5 baseline
+총 5,586 specialist 후보 + static round5 baseline
 current best single/beta1.00/scale0.5375/bias0.25를 정확히 포함
 ```
 
@@ -1808,28 +1864,28 @@ Colab 실행:
 ```bash
 %cd /content/SSE
 !git pull
-!bash scripts/run_light_deep_specialist_same_split_init_ensemble_colab.sh
+!bash scripts/run_light_deep_specialist_oof_stacking_colab.sh
 ```
 
 결과 summary JSON:
 
 ```text
-/content/drive/MyDrive/SSE_outputs/fusion4_light_deep_specialist_same_split_init_ensemble_context20_summary.json
+/content/drive/MyDrive/SSE_outputs/fusion4_light_deep_specialist_oof_stacking_context20_summary.json
 ```
 
 비교 포인트:
 
 ```text
 1. current_best_reference가 4M+4K 0.744948을 정확히 재현하는지
-2. 기존 single, init별 single, ensemble6 중 우세 source
+2. single과 OOF stack 18개 중 우세 source/C/class weight
 3. pure top과 0.0005 tie-rule selected 후보
 4. current best 대비 모든 metric의 절대/상대 변화율
 5. Deep precision/recall/F1, pooled Deep 정답, Deep→Light, Light→Deep 변화
-6. validation과 test가 같은 방향으로 움직이는지
+6. OOF validation과 test가 같은 방향으로 움직이는지
 ```
 
 현재 best는 outer split 하나당 31-checkpoint inference다.
-ensemble6 후보는 specialist 6개를 사용하므로 총 36 checkpoints다.
+stack 후보는 specialist 6개를 사용하므로 총 36 checkpoints다.
 
 ## 다음 채팅방 시작 프롬프트
 
@@ -1843,9 +1899,11 @@ exact scale은 0.5375다.
 Wake 0.5334 / Light 0.6706 / Deep 0.2364 / REM 0.3801 / Wake+REM 0.9135다.
 직전 best 대비 4M+4K +0.0324%, Deep +0.2026%, Wake+REM +0.0677%이며
 validation 총점은 -0.0865%다.
-다음 실험은 specialist same-split multi-init ensemble이다.
-Colab에서는 git pull 후 scripts/run_light_deep_specialist_same_split_init_ensemble_colab.sh를 실행하면 돼.
-결과 JSON을 받으면 current best 정확 재현, single/init별/ensemble6 source,
+same-split multi-init의 pure top/selected는 기존 single이라 current best는 유지한다.
+ensemble6 top은 current 대비 4M+4K -2.9066%, Deep -20.6251%였다.
+다음 실험은 specialist subject-OOF logistic stacking이다.
+Colab에서는 git pull 후 scripts/run_light_deep_specialist_oof_stacking_colab.sh를 실행하면 돼.
+결과 JSON을 받으면 current best 정확 재현, single/OOF-stack source,
 pure top/tie-rule selected, current best 대비 모든 metric과 Light/Deep confusion 변화를
 비교하고 새 best 및 다음 방향을 결정해줘.
 ```

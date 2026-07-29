@@ -354,6 +354,17 @@ def main() -> None:
             )
 
     selections = select_candidates(candidates, args.tie_band)
+    source_selections = {
+        label: select_candidates(
+            [
+                candidate
+                for candidate in candidates
+                if candidate["specialist"] == label
+            ],
+            args.tie_band,
+        )
+        for label in args.specialist_labels
+    }
     score_key = lambda item: item["test"]["4_macro_f1_plus_4_kappa"]["mean"]
     deep_key = lambda item: item["test"]["deep_f1"]["mean"]
     wake_rem_key = lambda item: item["test"]["wake_plus_rem"]["mean"]
@@ -367,6 +378,12 @@ def main() -> None:
         selections["selected_by_project_rule"],
         selections["best_deep_f1_within_tie_band"],
         selections["best_deep_f1"],
+        *[
+            record
+            for source_selection in source_selections.values()
+            for record in source_selection.values()
+            if isinstance(record, dict)
+        ],
     ]
     archived = {candidate["name"]: candidate for candidate in archived_candidates}
     report = {
@@ -403,6 +420,7 @@ def main() -> None:
         "static_round5_reference": static_round5_reference,
         "current_best_reference": current_best_reference,
         "selections": selections,
+        "source_selections": source_selections,
         "archived_candidates": list(archived.values()),
     }
     args.out_json.parent.mkdir(parents=True, exist_ok=True)
