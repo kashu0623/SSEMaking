@@ -378,6 +378,15 @@ pooled Deep 정답은 `401 -> 404`(+3), Deep→Light는 `1,040 -> 1,035`(-5)로
     OOF validation도 -12.5716%로 test와 같은 하락 방향
     weak replica의 상보 신호를 stacking으로 회수하지 못해 새 best 채택 없음
     실제 N3 오답의 핵심인 N2/N3 hard boundary를 직접 학습하는 specialist로 전환
+
+39. N2-vs-N3 hard-boundary specialist
+    current best 4M+4K 0.744948을 정확히 재현
+    3,235개 후보의 pure top/selected/tie-band Deep top이 모두 기존 single
+    best N2/N3 score는 h256 2-layer 0.727870, current 대비 -2.2925%
+    best N2/N3 Deep은 h256 1-layer 0.214710, current 대비 -9.1921%
+    N1 제외 hard-negative 학습은 current를 개선하지 못해 종료
+    Light-vs-Deep h256 2-layer는 test -1.0742%지만 validation +2.3462%
+    current h128과 validation-strong h256 2-layer pairwise blend로 전환
 ```
 
 flex4_refine에서 pure 4M+4K top은 아래 후보였다.
@@ -1464,6 +1473,48 @@ Light→Deep과 Deep false positive는 각각 `1,153 -> 774`(-379),
 /Users/chan/Downloads/fusion4_light_deep_specialist_oof_stacking_context20_summary.json
 ```
 
+N2-vs-N3 hard-boundary specialist도 current best를 정확히 재현했지만,
+3,235개 전체 후보의 pure top, tie-rule selected, best Deep within tie band는
+모두 기존 single specialist였다.
+
+```text
+best N2-vs-N3 by 4M+4K:
+n2n3_h256_inverse_lstm2__beta0.65_scale0.50_bias0.25
+4M+4K 0.727870 / Deep 0.174567 / validation 0.669919
+
+best N2-vs-N3 Deep among source-selected candidates:
+n2n3_h256_inverse_lstm__beta0.65_scale0.50_bias0.75
+4M+4K 0.727066 / Deep 0.214710 / validation 0.655249
+```
+
+N2/N3 h256 2-layer의 총점은 current 대비 `-2.2925%`, Deep은 `-26.1698%`다.
+N2/N3 중 Deep이 가장 높은 h256 1-layer도 Deep `-9.1921%`, 총점
+`-2.4004%`다. N1을 제외하면 N2/N3 학습 지표와 최종 4-class fusion 사이의
+분포 차이가 커져 current보다 나빠졌으므로 hard-boundary 계열은 종료한다.
+
+한편 Light-vs-Deep architecture control인 h256 2-layer는 가장 강한 새 source였다.
+
+```text
+light_h256_inverse_lstm2__beta0.90_scale0.75_bias-0.50
+4M 0.447877 / 4K 0.289069 / 4M+4K 0.736946
+Wake 0.532924 / Light 0.680687 / Deep 0.204965 / REM 0.372933
+Deep precision 0.265374 / Deep recall 0.181977 / Wake+REM 0.905858
+validation 4M+4K 0.697489
+```
+
+current 대비 test 총점은 `-0.008002(-1.0742%)`, Deep은 `-13.3136%`,
+Wake+REM은 `-0.8321%`지만 Light `+1.5074%`, Deep precision `+14.3757%`,
+validation 총점 `+2.3462%`다. pooled Deep 정답은 `404 -> 309`(-95)지만
+Light→Deep은 `1,153 -> 784`(-369), Deep false positive는
+`1,515 -> 991`(-524)로 크게 줄었다. current h128보다 보수적이지만 validation과
+precision 측면의 상보성이 있으므로 두 specialist를 소량부터 pairwise blend한다.
+
+결과:
+
+```text
+/Users/chan/Downloads/fusion4_light_deep_n2n3_specialist_context20_summary.json
+```
+
 ## 현재 코드 상태
 
 최근 추가된 핵심 스크립트:
@@ -1506,6 +1557,7 @@ scripts/run_light_deep_specialist_fusion_refinement_round2_colab.sh
 scripts/run_light_deep_specialist_same_split_init_ensemble_colab.sh
 scripts/run_light_deep_specialist_oof_stacking_colab.sh
 scripts/run_light_deep_n2n3_specialist_colab.sh
+scripts/run_light_deep_h128_h256_pair_blend_colab.sh
 src/sse_sleep/train_light_deep_specialist.py
 src/sse_sleep/evaluate_light_deep_specialist_fusion.py
 src/sse_sleep/average_light_deep_specialist_ensemble.py
@@ -1519,6 +1571,7 @@ Light(N1/N2)와 Deep(N3)을 분리해서 4-model flexible fusion weight를 탐�
 Light-vs-Deep specialist를 별도로 학습하고 current best의 Light+Deep 총질량 안에서
 calibrated P(Deep | Light 또는 Deep)만 blend한다.
 specialist trainer는 Light-vs-Deep과 N2-vs-N3 negative mode, LSTM/GRU를 지원한다.
+specialist average utility는 명시적 member weight를 지원한다.
 specialist evaluator는 global selection과 source별 selection을 함께 archive한다.
 ```
 
@@ -1872,37 +1925,32 @@ Colab 실행:
 우선순위 1:
 
 ```text
-N2-vs-N3 hard-boundary specialist
+Light-vs-Deep h128+h256 pairwise specialist blend
 ```
 
 목적:
 
 ```text
-현재 specialist는 N1+N2를 Light negative로 함께 학습한다.
-실제 N3 오답의 63.74%인 N2를 hard negative로 집중 학습하기 위해 N1을 제외한다.
-N2-vs-N3에서 class weighting, capacity, layer, recurrent cell을 비교한다.
-Light-vs-Deep h256/2-layer와 sqrt-weight control도 함께 평가해 원인을 분리한다.
+current h128 specialist의 높은 test 총점/Deep recall을 기준으로 유지한다.
+validation +2.3462%, Light/Deep precision이 강한 h256 2-layer를 소량부터 섞는다.
+약한 replica 여러 개를 평균하지 않고 검증 신호가 있는 두 architecture만 결합한다.
+각 pair blend source의 conditional fusion calibration을 다시 탐색한다.
 ```
 
 학습/융합 범위:
 
 ```text
 outer seed: 42 / 7 / 123
-feature/context: original temporal / context20
-N2-vs-N3:
-  h128 inverse/sqrt/none CE
-  h256 inverse CE
-  h128/h256 2-layer inverse CE
-  h128 GRU inverse CE
-  h128 inverse CE + label smoothing 0.03
-Light-vs-Deep controls:
-  h256 2-layer inverse CE
-  h128 sqrt CE
-source: 기존 single + 새 specialist 10종
+member 1: current original h128 1-layer inverse CE
+member 2: Light-vs-Deep h256 2-layer inverse CE
+h256 alpha:
+  0 / 0.025 / 0.05 / 0.075 / 0.10 / 0.15 / 0.20 / 0.25 / 0.30
+  0.40 / 0.50 / 0.60 / 0.70 / 0.80 / 0.90 / 0.95 / 1.00
+source: current single + h256 single + weighted blend 15종
 beta: 0.50~1.00
 scale: 0.25~1.50, current 0.5375 포함
 bias: -1.00~1.00, current 0.25 포함
-총 3,234 specialist 후보 + static round5 baseline
+총 4,998 specialist 후보 + static round5 baseline
 current best single/beta1.00/scale0.5375/bias0.25를 정확히 포함
 ```
 
@@ -1911,29 +1959,29 @@ Colab 실행:
 ```bash
 %cd /content/SSE
 !git pull
-!bash scripts/run_light_deep_n2n3_specialist_colab.sh
+!bash scripts/run_light_deep_h128_h256_pair_blend_colab.sh
 ```
 
 결과 summary JSON:
 
 ```text
-/content/drive/MyDrive/SSE_outputs/fusion4_light_deep_n2n3_specialist_context20_summary.json
+/content/drive/MyDrive/SSE_outputs/fusion4_light_deep_h128_h256_pair_blend_context20_summary.json
 ```
 
 비교 포인트:
 
 ```text
 1. current_best_reference가 4M+4K 0.744948을 정확히 재현하는지
-2. N2-vs-N3와 Light-vs-Deep control 중 우세 source
+2. h256 alpha별 source-selected 성능과 최적 blend 비율
 3. pure top과 0.0005 tie-rule selected 후보
 4. current best 대비 모든 metric의 절대/상대 변화율
-5. Deep precision/recall/F1, pooled Deep 정답, Deep→Light/N1/REM 변화
-6. Light→Deep과 N1→Deep 증가 여부
+5. Deep precision/recall/F1, pooled Deep 정답, Deep→Light 변화
+6. Light→Deep과 Deep false positive 감소가 recall 손실을 상쇄하는지
 7. validation과 test가 같은 방향으로 움직이는지
 ```
 
 현재 best는 outer split 하나당 31-checkpoint inference다.
-새 specialist 후보도 outer split 하나당 총 31 checkpoints다.
+pair blend 후보는 specialist 2개를 사용하므로 총 32 checkpoints다.
 
 ## 다음 채팅방 시작 프롬프트
 
@@ -1951,9 +1999,11 @@ same-split multi-init의 pure top/selected는 기존 single이라 current best�
 ensemble6 top은 current 대비 4M+4K -2.9066%, Deep -20.6251%였다.
 OOF stacking의 best stack도 current 대비 4M+4K -3.2418%, Deep -22.2464%였다.
 replica 결합 계열은 종료한다.
-다음 실험은 N2-vs-N3 hard-boundary specialist다.
-Colab에서는 git pull 후 scripts/run_light_deep_n2n3_specialist_colab.sh를 실행하면 돼.
-결과 JSON을 받으면 current best 정확 재현, N2-vs-N3/Light control source,
+N2-vs-N3 specialist도 current를 넘지 못해 hard-boundary 계열은 종료한다.
+Light-vs-Deep h256 2-layer는 test -1.0742%지만 validation +2.3462%였다.
+다음 실험은 current h128+h256 2-layer pairwise specialist blend다.
+Colab에서는 git pull 후 scripts/run_light_deep_h128_h256_pair_blend_colab.sh를 실행하면 돼.
+결과 JSON을 받으면 current best 정확 재현, h256 alpha별 source,
 pure top/tie-rule selected, current best 대비 모든 metric과 Light/Deep confusion 변화를
 비교하고 새 best 및 다음 방향을 결정해줘.
 ```

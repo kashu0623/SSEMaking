@@ -33,16 +33,18 @@ ensemble6 top은 current 대비 4M+4K -2.9066%, Deep -20.6251%였다.
 OOF stacking의 best stack도 current 대비 4M+4K -3.2418%, Deep -22.2464%였다.
 replica 결합 계열은 종료한다.
 
-다음 실험은 N2-vs-N3 hard-boundary specialist야.
-N1을 제외하고 N2를 hard negative로 집중 학습하며 class weighting, h256,
-2-layer LSTM, GRU와 Light-vs-Deep control을 비교한다.
+N2-vs-N3 specialist도 current를 넘지 못해 hard-boundary 계열은 종료한다.
+Light-vs-Deep h256 2-layer는 test -1.0742%지만 validation +2.3462%였다.
+
+다음 실험은 current h128+h256 2-layer pairwise specialist blend야.
+h256 probability를 2.5%부터 95%까지 섞고 각 source의 calibration을 다시 탐색한다.
 
 Colab 실행:
 %cd /content/SSE
 !git pull
-!bash scripts/run_light_deep_n2n3_specialist_colab.sh
+!bash scripts/run_light_deep_h128_h256_pair_blend_colab.sh
 
-결과 summary JSON을 받으면 current best 정확 재현, N2-vs-N3/Light control source,
+결과 summary JSON을 받으면 current best 정확 재현, h256 alpha별 source,
 pure top/tie-rule selected, current best 대비 모든 metric의 절대/상대 변화율과
 Light/Deep confusion 변화를 비교하고 새 best 및 다음 방향을 정한 뒤
 docs/current_progress_summary.md를 갱신해줘.
