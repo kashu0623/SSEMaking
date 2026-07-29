@@ -6,43 +6,39 @@
 ```text
 docs/current_progress_summary.md를 읽고 이어서 진행해줘.
 
-현재 목표는 비용, 모델 수, 추론량을 무시하고 성능-only 기준으로 DreamT sleep stage estimation fixed/flexible fusion 성능을 개선하는 거야.
+4-class fusion refinement는 잠시 멈추고 앱 목적 중심 Light-vs-rest 트랙을 시작했어.
+비용, 모델 수, 추론량은 무시하고 성능만 본다.
 
-현재 best는 기존 30-checkpoint static hybrid + h128/h256 Light/Deep specialists:
+기존 4-class best는 기존 30-checkpoint static hybrid + h128/h256 specialists:
 blend_a0600__beta0.97_scale0.75_bias0.25
 exact beta는 0.975다.
-member probability는 0.40 original-h128-CE + 0.60 Light-h256-2layer-CE다.
-outer split 하나당 총 32 checkpoints다.
 
 3-seed 평균:
 4M 0.4572 / 4K 0.2917 / 4M+4K 0.7489
 Wake 0.5356 / Light 0.6719 / Deep 0.2463 / REM 0.3751 / Wake+REM 0.9107
 
-선택 기준:
-3-seed 평균에서 4M+4K가 가장 높은 후보를 best로 둔다.
-단, 4M+4K 차이가 0.0005 이하이면 Wake+REM이 더 높은 후보를 우선한다.
-
 최종 알람은 수면 단계 AI 단독이 아니라 미세 움직임/RR/RRV/HR/HRV/피부온도 변화를
 0~1 정규화 후 가중합하는 PotchArousalCalculator의 각성 점수와 함께 판단할 예정이다.
 
-직전 best 대비 4M+4K -0.0037%, Wake+REM +0.0267%라 tie 규칙으로 채택했다.
-4K +0.0611%, Light +0.0789%, REM +0.0421%다.
-Deep -0.6443%, Deep precision +0.0632%, Deep recall -1.2587%다.
-validation 4M+4K는 +0.0205%다.
+새 primary target은 Light(N1/N2) vs Other(Wake/Deep/REM)다.
+Deep은 제외하지 않고 Light의 hard negative로 사용한다.
+direct binary와 4-class auxiliary multitask, Deep multiplier 1/2/4,
+h128 1-layer와 h256 2-layer를 같은 outer split에서 비교한다.
 
-pure top은 alpha0.60/beta1.00/scale0.775/bias0.25로 4M+4K 0.749230이지만
-selected보다 Wake+REM이 0.000580 낮다.
+기존 current argmax의 binary baseline:
+pooled Light F1 0.671859 / binary Kappa 0.237415
+Light precision 0.702532 / recall 0.643752 / Deep→Light 0.607715
 
-다음 실험은 selected와 pure top 주변 pair-blend refinement round2야.
-h256 alpha 0.575~0.625와 beta/scale/bias를 더 촘촘히 탐색한다.
+모델/threshold 선택은 validation 3-seed 평균 Light F1 + binary Kappa로 하고
+test는 보고에만 사용한다. Deep→Light 제한별 Light recall profile도 함께 본다.
 
 Colab 실행:
 %cd /content/SSE
 !git pull
-!bash scripts/run_light_deep_h128_h256_pair_blend_refinement_round2_colab.sh
+!bash scripts/run_light_alarm_objective_colab.sh
 
-결과 summary JSON을 받으면 current best 정확 재현, alpha별 source,
-pure top/tie-rule selected, current best 대비 모든 metric의 절대/상대 변화율과
-Light/Deep confusion 및 REM/Wake+REM 변화를 비교하고 새 best 및 다음 방향을 정한 뒤
+결과 summary JSON을 받으면 best Light objective, best Light F1, Deep 누출 제한별 profile,
+direct/multitask와 Deep multiplier/architecture 차이, validation-test 방향을 비교하고
+앱용 새 best와 다음 방향을 정한 뒤
 docs/current_progress_summary.md를 갱신해줘.
 ```

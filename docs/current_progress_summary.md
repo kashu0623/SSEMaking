@@ -7,6 +7,10 @@
 
 비용, 모델 수, 추론량은 무시하고 성능만 최우선으로 본다.
 
+4-class fusion refinement는 잠시 멈춘다. 현재 앱 목적에 직접 맞춘
+`Light(N1/N2) vs Other(Wake/Deep/REM)` 분류를 새 주 실험 트랙으로 둔다.
+Deep은 제거하지 않고 Light로 오인하면 안 되는 hard negative로 사용한다.
+
 기본 선택 기준:
 
 ```text
@@ -418,6 +422,18 @@ Light→Deep은 `1,094 -> 1,081`(-13), Deep false positive는
     Deep 정답 -6, Deep→Light +6, Light→Deep -13, Deep false positive -15
     validation 4M+4K +0.0205%
     tie 규칙에 따라 selected를 새 best로 채택하고 두 경쟁점 주변 round2로 전환
+
+42. 앱 목적 중심 Light-vs-rest 트랙으로 전환
+    4-class fusion refinement round2는 실행 전 보류
+    primary target을 Light(N1/N2) vs Other(Wake/Deep/REM)로 변경
+    Deep을 제외하지 않고 negative loss multiplier와 subgroup metric으로 관리
+    direct binary와 4-class auxiliary multitask를 같은 outer split에서 비교
+    threshold와 model selection은 validation 3-seed 평균만 사용
+    test는 최종 보고에만 사용해 threshold test leakage를 방지
+    기존 current best argmax baseline:
+      pooled Light F1 0.671859 / binary Kappa 0.237415
+      Light precision 0.702532 / recall 0.643752
+      Deep→Light 0.607715
 ```
 
 flex4_refine에서 pure 4M+4K top은 아래 후보였다.
@@ -1680,7 +1696,10 @@ scripts/run_light_deep_n2n3_specialist_colab.sh
 scripts/run_light_deep_h128_h256_pair_blend_colab.sh
 scripts/run_light_deep_h128_h256_pair_blend_refinement_colab.sh
 scripts/run_light_deep_h128_h256_pair_blend_refinement_round2_colab.sh
+scripts/run_light_alarm_objective_colab.sh
 src/sse_sleep/train_light_deep_specialist.py
+src/sse_sleep/train_light_alarm.py
+src/sse_sleep/evaluate_light_alarm.py
 src/sse_sleep/evaluate_light_deep_specialist_fusion.py
 src/sse_sleep/average_light_deep_specialist_ensemble.py
 src/sse_sleep/stack_light_deep_specialists.py
@@ -1695,6 +1714,10 @@ calibrated P(Deep | Light 또는 Deep)만 blend한다.
 specialist trainer는 Light-vs-Deep과 N2-vs-N3 negative mode, LSTM/GRU를 지원한다.
 specialist average utility는 명시적 member weight를 지원한다.
 specialist evaluator는 global selection과 source별 selection을 함께 archive한다.
+Light alarm trainer는 전체 Wake/Light/Deep/REM epoch를 사용해 Light-vs-rest를 학습한다.
+Deep/Wake/REM negative multiplier, stage-balanced sampler, 4-class auxiliary head를 지원한다.
+Light alarm evaluator는 validation에서만 threshold/model을 선택하고 test는 보고에만 쓴다.
+Light F1/binary Kappa와 Wake/Deep/REM→Light 누출률, Deep 누출 제한별 profile을 기록한다.
 ```
 
 평가기는 아래 옵션을 지원하도록 확장되어 있다.
@@ -2047,30 +2070,35 @@ Colab 실행:
 우선순위 1:
 
 ```text
-Light-vs-Deep h128+h256 pairwise specialist blend refinement round2
+App-oriented Light-vs-rest objective audit
 ```
 
 목적:
 
 ```text
-tie-rule selected alpha0.60/beta0.975/scale0.75/bias0.25와
-pure top alpha0.60/beta1.00/scale0.775/bias0.25 사이를 미세 탐색한다.
-4M+4K를 유지하거나 높이면서 Wake+REM 우위를 더 확보한다.
-selected에서 소폭 후퇴한 Deep/recall을 회복할 수 있는지 확인한다.
+4-class 이름을 모두 맞히는 대신 앱이 실제로 필요한 Light 여부를 직접 학습한다.
+Deep을 제거하지 않고 Light의 hard negative로 두어 Deep→Light 누출을 줄인다.
+direct binary와 4-class auxiliary multitask가 Light 성능에 주는 영향을 비교한다.
+threshold/model 선택은 validation에서만 하고 test leakage를 막는다.
 ```
 
-학습/융합 범위:
+학습/평가 범위:
 
 ```text
 outer seed: 42 / 7 / 123
-member 1: current original h128 1-layer inverse CE
-member 2: Light-vs-Deep h256 2-layer inverse CE
-h256 alpha: 0.575~0.625, 0.005 간격
-beta: 0.95 / 0.96 / 0.975 / 0.98 / 0.99 / 1.00
-scale: 0.72 / 0.73 / 0.74 / 0.75 / 0.76 / 0.77 / 0.775 / 0.79 / 0.80
-bias: 0.20 / 0.225 / 0.25 / 0.275 / 0.30
-총 2,970 specialist 후보 + static round5 baseline
-current selected와 previous pure top을 모두 정확히 포함
+dataset: original temporal context20
+primary label: Light(N1/N2)=1, Wake/Deep/REM=0
+architecture:
+  h128 1-layer LSTM
+  h256 2-layer LSTM
+direct binary:
+  Deep negative multiplier 1 / 2 / 4
+  stage-balanced sampler control
+multitask:
+  같은 primary head + inverse-weighted 4-class auxiliary CE x 0.25
+  Deep negative multiplier 1 / 2 / 4
+threshold: 0.10~0.90, 0.025 간격
+총 9 configs x 3 outer seeds
 ```
 
 Colab 실행:
@@ -2078,49 +2106,53 @@ Colab 실행:
 ```bash
 %cd /content/SSE
 !git pull
-!bash scripts/run_light_deep_h128_h256_pair_blend_refinement_round2_colab.sh
+!bash scripts/run_light_alarm_objective_colab.sh
 ```
 
 결과 summary JSON:
 
 ```text
-/content/drive/MyDrive/SSE_outputs/fusion4_light_deep_h128_h256_pair_blend_refine_round2_context20_summary.json
+/content/drive/MyDrive/SSE_outputs/fusion_light_alarm_objective_context20_summary.json
 ```
 
 비교 포인트:
 
 ```text
-1. current_best_reference가 selected 4M+4K 0.748878을 정확히 재현하는지
-2. alpha 0.60 주변의 최적 blend 비율과 ridge 폭
-3. pure top과 0.0005 tie-rule selected 후보
-4. current best 대비 모든 metric의 절대/상대 변화율
-5. Deep precision/recall/F1, pooled Deep 정답, Deep→Light 변화
-6. Light→Deep과 Deep false positive 및 REM/Wake+REM 변화
-7. validation과 test가 같은 방향으로 움직이는지
+1. 기존 current argmax baseline:
+   pooled Light F1 0.671859 / binary Kappa 0.237415
+   precision 0.702532 / recall 0.643752 / Deep→Light 0.607715
+2. validation-selected best Light objective(Light F1 + binary Kappa)
+3. direct binary와 4-class auxiliary multitask 비교
+4. Deep multiplier 1/2/4에 따른 Light recall과 Deep→Light trade-off
+5. h128 1-layer와 h256 2-layer 비교
+6. Deep→Light <= 0.10/0.20/0.30/0.40 profile에서 가능한 Light recall
+7. Wake→Light, REM→Light, Light precision/recall/F1
+8. validation 선택이 test에서도 같은 방향인지
 ```
 
-현재 best와 refinement 후보 모두 outer split 하나당 총 32-checkpoint inference다.
+기존 4-class current best와 pair-blend refinement round2 스크립트는 보존하되,
+새 Light-vs-rest 결과를 보기 전까지 추가 fusion refinement는 진행하지 않는다.
 
 ## 다음 채팅방 시작 프롬프트
 
 ```text
 docs/current_progress_summary.md를 읽고 이어서 진행해줘.
-현재 목표는 비용 무시, 성능-only fixed/flexible fusion 개선이야.
-현재 best는 기존 30-checkpoint static hybrid + h128/h256 Light/Deep specialists:
+4-class fusion refinement는 잠시 멈추고 앱 목적 중심 Light-vs-rest 트랙을 시작했어.
+기존 4-class best는 기존 30-checkpoint static hybrid + h128/h256 specialists:
 blend_a0600__beta0.97_scale0.75_bias0.25
 exact beta는 0.975다.
-member probability는 0.40 original-h128-CE + 0.60 Light-h256-2layer-CE다.
-outer split 하나당 총 32 checkpoints다.
 3-seed 평균은 4M 0.4572 / 4K 0.2917 / 4M+4K 0.7489,
 Wake 0.5356 / Light 0.6719 / Deep 0.2463 / REM 0.3751 / Wake+REM 0.9107다.
-직전 best 대비 4M+4K -0.0037%, Wake+REM +0.0267%라 tie 규칙으로 채택했다.
-Deep은 -0.6443%, precision은 +0.0632%, recall은 -1.2587%다.
-pure top은 beta1.00/scale0.775로 4M+4K 0.749230이지만
-selected보다 Wake+REM이 0.000580 낮다.
-다음 실험은 두 경쟁점 주변 pair-blend refinement round2다.
+새 primary target은 Light(N1/N2) vs Other(Wake/Deep/REM)다.
+Deep은 제외하지 않고 hard negative multiplier 1/2/4로 비교한다.
+direct binary와 4-class auxiliary multitask, h128/h256을 같은 split에서 평가한다.
+기존 current argmax binary baseline은 pooled Light F1 0.671859,
+binary Kappa 0.237415, precision 0.702532, recall 0.643752,
+Deep→Light 0.607715다.
+모델/threshold 선택은 validation 3-seed 평균으로만 하고 test는 보고에만 사용한다.
 Colab에서는 git pull 후
-scripts/run_light_deep_h128_h256_pair_blend_refinement_round2_colab.sh를 실행하면 돼.
-결과 JSON을 받으면 current best 정확 재현, alpha별 source,
-pure top/tie-rule selected, current best 대비 모든 metric의 절대/상대 변화율과
-Light/Deep confusion 및 REM/Wake+REM 변화를 비교하고 새 best 및 다음 방향을 결정해줘.
+scripts/run_light_alarm_objective_colab.sh를 실행하면 돼.
+결과 JSON을 받으면 best Light objective, best Light F1, Deep 누출 제한별 profile,
+direct/multitask와 Deep multiplier/architecture 차이, validation-test 방향을 비교하고
+앱용 새 best와 다음 방향을 결정해줘.
 ```
