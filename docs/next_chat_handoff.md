@@ -20,25 +20,26 @@ Wake 0.5356 / Light 0.6719 / Deep 0.2463 / REM 0.3751 / Wake+REM 0.9107
 최종 알람은 수면 단계 AI 단독이 아니라 미세 움직임/RR/RRV/HR/HRV/피부온도 변화를
 0~1 정규화 후 가중합하는 PotchArousalCalculator의 각성 점수와 함께 판단할 예정이다.
 
-새 primary target은 Light(N1/N2) vs Other(Wake/Deep/REM)다.
-Deep은 제외하지 않고 Light의 hard negative로 사용한다.
-direct binary와 4-class auxiliary multitask, Deep multiplier 1/2/4,
-h128 1-layer와 h256 2-layer를 같은 outer split에서 비교한다.
-
 기존 current argmax의 binary baseline:
 pooled Light F1 0.671859 / binary Kappa 0.237415
 Light precision 0.702532 / recall 0.643752 / Deep→Light 0.607715
 
-모델/threshold 선택은 validation 3-seed 평균 Light F1 + binary Kappa로 하고
-test는 보고에만 사용한다. Deep→Light 제한별 Light recall profile도 함께 본다.
+direct Light-vs-rest best는 Light F1 +11.6937%, recall +43.0780%였지만
+binary Kappa -36.4450%, precision -9.8794%, Deep→Light +55.4688%라 채택하지 않았다.
+validation Deep 누출 제한도 test에서 모두 초과해 단독 binary/multitask는 unsafe했다.
+
+다음은 direct Light probability를 proposal로 쓰고 current
+P(Deep|Light,Deep)를 explicit veto로 적용하는 audit다.
+validation Deep→Light를 current baseline 0.528169 이하로 제한한 뒤
+그 안에서 Light objective가 가장 높은 후보를 선택한다.
 
 Colab 실행:
 %cd /content/SSE
 !git pull
-!bash scripts/run_light_alarm_objective_colab.sh
+!bash scripts/run_light_alarm_deep_veto_fusion_colab.sh
 
-결과 summary JSON을 받으면 best Light objective, best Light F1, Deep 누출 제한별 profile,
-direct/multitask와 Deep multiplier/architecture 차이, validation-test 방향을 비교하고
-앱용 새 best와 다음 방향을 정한 뒤
+결과 summary JSON을 받으면 current Deep 누출 constraint 내 selected, safe profile,
+baseline 대비 모든 metric 변화, alpha/gamma ridge, validation-test constraint 이전을
+비교하고 앱용 새 best와 다음 방향을 정한 뒤
 docs/current_progress_summary.md를 갱신해줘.
 ```

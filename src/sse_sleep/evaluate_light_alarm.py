@@ -10,7 +10,6 @@ from typing import Any, Sequence
 import numpy as np
 
 from .labels import STAGE4_NAMES, STAGE4_TO_ID
-from .metrics import evaluate
 
 
 BINARY_NAMES = ("Other", "Light")
@@ -108,23 +107,17 @@ def metrics_at_threshold(
 ) -> dict[str, Any]:
     true_binary = (labels_4 == STAGE4_TO_ID["Light"]).astype(np.int64)
     predictions = (probabilities >= threshold).astype(np.int64)
-    result = evaluate(true_binary.tolist(), predictions.tolist(), BINARY_NAMES)
-    light = result.class_wise["Light"]
-    other = result.class_wise["Other"]
+    confusion = np.bincount(
+        2 * true_binary + predictions,
+        minlength=4,
+    ).reshape(2, 2)
+    result = binary_metrics_from_confusion(confusion)
     return {
-        "accuracy": float(result.accuracy),
-        "balanced_accuracy": float((light.recall + other.recall) / 2.0),
-        "macro_f1": float(result.macro_f1),
-        "binary_kappa": float(result.cohen_kappa),
-        "light_objective": float(light.f1 + result.cohen_kappa),
-        "light_precision": float(light.precision),
-        "light_recall": float(light.recall),
-        "light_f1": float(light.f1),
-        "other_recall": float(other.recall),
+        **result,
         "wake_to_light_rate": positive_rate(labels_4, predictions, "Wake"),
         "deep_to_light_rate": positive_rate(labels_4, predictions, "Deep"),
         "rem_to_light_rate": positive_rate(labels_4, predictions, "REM"),
-        "confusion_matrix": result.confusion_matrix,
+        "confusion_matrix": confusion.tolist(),
     }
 
 
