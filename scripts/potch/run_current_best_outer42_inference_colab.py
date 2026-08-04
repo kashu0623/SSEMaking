@@ -307,6 +307,70 @@ def summarize_predictions(prediction: np.ndarray) -> dict[str, Any]:
     }
 
 
+def run_count(prediction: np.ndarray) -> int:
+    if prediction.size == 0:
+        return 0
+    return int(1 + np.sum(prediction[1:] != prediction[:-1]))
+
+
+def probability_summary(probabilities: np.ndarray) -> dict[str, Any]:
+    prediction = probabilities.argmax(axis=1).astype(np.int64)
+    sorted_probs = np.sort(probabilities, axis=1)
+    margins = sorted_probs[:, -1] - sorted_probs[:, -2]
+    return {
+        "class_counts": summarize_predictions(prediction),
+        "probability_mean": {
+            name: float(probabilities[:, index].mean())
+            for index, name in enumerate(STAGE4_NAMES)
+        },
+        "margin": {
+            "mean": float(margins.mean()),
+            "median": float(np.median(margins)),
+            "low_lt_0_03": int(np.sum(margins < 0.03)),
+            "low_lt_0_05": int(np.sum(margins < 0.05)),
+            "low_lt_0_10": int(np.sum(margins < 0.10)),
+        },
+        "run_count": run_count(prediction),
+    }
+
+
+def write_component_diagnostics(
+    out_dir: Path,
+    meta: pd.DataFrame,
+    variants: dict[str, np.ndarray],
+) -> tuple[Path, Path, Path, dict[str, Any]]:
+    diagnostic = meta[["session_id", "epoch_index", "start_app_ts", "end_app_ts"]].copy()
+    summary: dict[str, Any] = {}
+    npz_arrays: dict[str, np.ndarray] = {
+        "stage_names": np.asarray(STAGE4_NAMES),
+        "session_id": diagnostic["session_id"].to_numpy(dtype=np.int64),
+        "epoch_index": diagnostic["epoch_index"].to_numpy(dtype=np.int64),
+        "start_app_ts": diagnostic["start_app_ts"].to_numpy(dtype=np.int64),
+        "end_app_ts": diagnostic["end_app_ts"].to_numpy(dtype=np.int64),
+    }
+
+    for variant_name, probabilities in variants.items():
+        prediction = probabilities.argmax(axis=1).astype(np.int64)
+        for index, stage_name in enumerate(STAGE4_NAMES):
+            diagnostic[f"{variant_name}_p_{stage_name.lower()}"] = probabilities[:, index]
+        diagnostic[f"{variant_name}_pred_id"] = prediction
+        diagnostic[f"{variant_name}_pred_stage"] = [STAGE4_NAMES[index] for index in prediction]
+        summary[variant_name] = probability_summary(probabilities)
+        npz_arrays[f"{variant_name}_probs"] = probabilities.astype(np.float32)
+        npz_arrays[f"{variant_name}_pred"] = prediction
+
+    diagnostic_csv = out_dir / "potch_model_component_predictions.csv"
+    diagnostic_npz = out_dir / "potch_model_component_predictions.npz"
+    diagnostic_json = out_dir / "potch_model_component_summary.json"
+    diagnostic.to_csv(diagnostic_csv, index=False)
+    np.savez_compressed(diagnostic_npz, **npz_arrays)
+    diagnostic_json.write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return diagnostic_csv, diagnostic_npz, diagnostic_json, summary
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run Potch clean epochs through current outer42 best.")
     input_group = parser.add_mutually_exclusive_group(required=True)
@@ -449,6 +513,24 @@ def main() -> None:
         SPECIALIST_BIAS,
     ).astype(np.float32)
     final_pred = final_probs.argmax(axis=1).astype(np.int64)
+    component_variants = {
+        "original_ensemble": current_probs_to_four(original_probs),
+        "full_w20_ensemble": current_probs_to_four(full_probs),
+        "capacity_h128_ensemble": current_probs_to_four(capacity_probs),
+        "h128_ls003_ensemble": current_probs_to_four(ls003_probs),
+        "four_model_current": current4,
+        "direct4_single": direct4_single_probs,
+        "direct4_ensemble": direct4_ensemble_probs,
+        "direct4_source_blend": direct4_source,
+        "static_hybrid_no_specialist": static_best,
+        "final_with_specialist": final_probs,
+    }
+    (
+        component_csv,
+        component_npz,
+        component_json,
+        component_summary,
+    ) = write_component_diagnostics(args.out_dir, meta_original, component_variants)
 
     out = meta_original.copy()
     for index, name in enumerate(STAGE4_NAMES):
@@ -478,6 +560,9 @@ def main() -> None:
         "device": str(device),
         "prediction_csv": str(prediction_csv),
         "prediction_npz": str(prediction_npz),
+        "component_prediction_csv": str(component_csv),
+        "component_prediction_npz": str(component_npz),
+        "component_summary_json": str(component_json),
         "prediction_count": int(final_probs.shape[0]),
         "class_counts": summarize_predictions(final_pred),
         "probability_mean": {
@@ -487,6 +572,7 @@ def main() -> None:
         "original_feature_report": original_report,
         "w20_feature_report": w20_report,
         "raw_feature_report": raw_report,
+        "component_summary": component_summary,
         "imputation_note": (
             "Features absent from Potch clean CSV were imputed with the DreamT "
             "training mean, which becomes 0 after normalization."
