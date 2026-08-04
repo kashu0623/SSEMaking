@@ -311,6 +311,8 @@ def parse_args() -> argparse.Namespace:
     input_group.add_argument("--raw-bin", type=Path)
     parser.add_argument("--output-root", type=Path, default=Path("/content/drive/MyDrive/SSE_outputs"))
     parser.add_argument("--out-dir", type=Path, default=Path("/content/drive/MyDrive/SSE_outputs/potch_current_best_outer42"))
+    parser.add_argument("--original-npz", type=Path, help="DreamT original temporal context20 NPZ schema.")
+    parser.add_argument("--w20-npz", type=Path, help="DreamT full-w20 temporal context20 NPZ schema.")
     parser.add_argument("--outer-seed", type=int, default=42)
     parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--session-gap-ms", type=int, default=30_000)
@@ -345,20 +347,21 @@ def main() -> None:
         )
     if clean_csv is None:
         raise ValueError("Expected --clean-csv, --raw-zip, or --raw-bin")
-    original_npz = find_existing(
+    original_npz = args.original_npz or find_existing(
         [
             output_root / "dreamt_100hz_temporal_lstm_context20.npz",
             output_root / "dreamt_100hz_temporal_lstm_context20_seed42.npz",
         ],
         "original temporal context20 NPZ",
     )
-    w20_npz = find_existing(
+    w20_npz = args.w20_npz or find_existing(
         [
             output_root / "dreamt_100hz_temporal_w20_lstm_context20.npz",
             output_root / "dreamt_100hz_temporal_w20_lstm_context20_seed42.npz",
         ],
         "full-w20 temporal context20 NPZ",
     )
+    check_paths([original_npz, w20_npz])
 
     x_original, meta_original, original_report = build_context_windows(clean_csv, original_npz)
     x_w20, meta_w20, w20_report = build_context_windows(clean_csv, w20_npz)
