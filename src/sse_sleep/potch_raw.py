@@ -13,7 +13,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-from .features import basic_stats
+from .features import basic_stats, quality_features
 
 
 RECORD_BYTES = 150
@@ -35,6 +35,9 @@ FEATURE_COLUMNS = (
     "ppg_min",
     "ppg_max",
     "ppg_slope",
+    "ppg_missing_ratio",
+    "ppg_flatline_ratio",
+    "ppg_edge_ratio",
     "acc_x_mean",
     "acc_x_std",
     "acc_x_median",
@@ -56,6 +59,14 @@ FEATURE_COLUMNS = (
     "acc_z_min",
     "acc_z_max",
     "acc_z_slope",
+    "acc_vm_mean",
+    "acc_vm_std",
+    "acc_vm_median",
+    "acc_vm_iqr",
+    "acc_vm_min",
+    "acc_vm_max",
+    "acc_vm_slope",
+    "acc_vm_activity",
     "gyro_x_mean",
     "gyro_x_std",
     "gyro_x_median",
@@ -215,9 +226,30 @@ def flatten_ppg(packets: Sequence[PotchPacket]) -> list[int]:
     return [value for packet in packets for value in packet.ppg]
 
 
+def flattened_acc_vm(packets: Sequence[PotchPacket]) -> list[float]:
+    values: list[float] = []
+    for packet in packets:
+        for sample in packet.imu:
+            acc_x, acc_y, acc_z = sample[:3]
+            values.append(math.sqrt(acc_x * acc_x + acc_y * acc_y + acc_z * acc_z))
+    return values
+
+
+def activity(values: Sequence[float]) -> float | None:
+    if len(values) < 2:
+        return None
+    movement = sum(abs(after - before) for before, after in zip(values, values[1:], strict=False))
+    return movement / (len(values) - 1)
+
+
 def stats_for_raw(values: Iterable[int], prefix: str) -> dict[str, float | None]:
     stats = basic_stats(values, prefix)
     return {key.removeprefix(f"{prefix}_"): value for key, value in stats.items()}
+
+
+def quality_for_raw(values: Sequence[int], prefix: str) -> dict[str, float | None]:
+    features = quality_features(values, prefix)
+    return {key.removeprefix(f"{prefix}_"): value for key, value in features.items()}
 
 
 def epoch_row(session_id: int, epoch_index: int, packets: Sequence[PotchPacket], quality: QualityFilter) -> dict[str, Any]:
@@ -255,12 +287,18 @@ def epoch_row(session_id: int, epoch_index: int, packets: Sequence[PotchPacket],
         row[f"{name}_mean"] = stats["mean"]
         row[f"{name}_min"] = stats["min"]
         row[f"{name}_max"] = stats["max"]
-    for prefix, values in [("ppg", flatten_ppg(packets))]:
-        for suffix, value in stats_for_raw(values, prefix).items():
-            row[f"{prefix}_{suffix}"] = value
+    ppg_values = flatten_ppg(packets)
+    for suffix, value in stats_for_raw(ppg_values, "ppg").items():
+        row[f"ppg_{suffix}"] = value
+    for suffix, value in quality_for_raw(ppg_values, "ppg").items():
+        row[f"ppg_{suffix}"] = value
     for axis_index, axis_name in enumerate(IMU_AXES):
         for suffix, value in stats_for_raw(flattened_imu_axis(packets, axis_index), axis_name).items():
             row[f"{axis_name}_{suffix}"] = value
+    acc_vm_values = flattened_acc_vm(packets)
+    for suffix, value in stats_for_raw(acc_vm_values, "acc_vm").items():
+        row[f"acc_vm_{suffix}"] = value
+    row["acc_vm_activity"] = activity(acc_vm_values)
     quality_pass = (
         len(packets) >= quality.packet_count_min
         and duration_ms >= quality.duration_ms_min

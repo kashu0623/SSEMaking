@@ -46,11 +46,15 @@ BASE_FEATURE_MAP = {
     "bvp_min": "ppg_min",
     "bvp_max": "ppg_max",
     "bvp_slope": "ppg_slope",
+    "bvp_missing_ratio": "ppg_missing_ratio",
+    "bvp_flatline_ratio": "ppg_flatline_ratio",
+    "bvp_edge_ratio": "ppg_edge_ratio",
 }
 
-for axis in ("x", "y", "z"):
+for axis in ("x", "y", "z", "vm"):
     for suffix in ("mean", "std", "median", "iqr", "min", "max", "slope"):
         BASE_FEATURE_MAP[f"acc_{axis}_{suffix}"] = f"acc_{axis}_{suffix}"
+BASE_FEATURE_MAP["acc_vm_activity"] = "acc_vm_activity"
 
 
 TEMPORAL_DELTA_RE = re.compile(r"^(?P<base>.+)_delta_(?P<lag>[0-9]+)$")
