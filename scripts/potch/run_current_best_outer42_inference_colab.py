@@ -59,6 +59,7 @@ for signal in ("hr", "ibi"):
 
 TEMPORAL_DELTA_RE = re.compile(r"^(?P<base>.+)_delta_(?P<lag>[0-9]+)$")
 TEMPORAL_ROLL_RE = re.compile(r"^(?P<base>.+)_roll_(?P<stat>mean|std)_(?P<window>[0-9]+)$")
+FEATURE_PROFILES = ("current", "stable-vitals-v5")
 
 
 def find_existing(paths: Sequence[Path], label: str) -> Path:
@@ -78,8 +79,36 @@ def load_train_schema(npz_path: Path) -> dict[str, np.ndarray]:
         }
 
 
-def base_value(row: pd.Series, feature: str) -> float:
-    source = BASE_FEATURE_MAP.get(feature)
+def stable_vitals_v5_disabled(feature: str) -> bool:
+    delta_match = TEMPORAL_DELTA_RE.match(feature)
+    roll_match = TEMPORAL_ROLL_RE.match(feature)
+    if delta_match is not None:
+        base = delta_match.group("base")
+    elif roll_match is not None:
+        base = roll_match.group("base")
+    else:
+        base = feature
+
+    if base == "bvp_mean":
+        return True
+    if base.startswith("hr_") or base.startswith("ibi_"):
+        if delta_match is not None or roll_match is not None:
+            return True
+        suffix = base.split("_", 1)[1]
+        return suffix not in {"mean", "median", "min", "max"}
+    return False
+
+
+def feature_disabled(feature: str, feature_profile: str) -> bool:
+    if feature_profile == "current":
+        return False
+    if feature_profile == "stable-vitals-v5":
+        return stable_vitals_v5_disabled(feature)
+    raise ValueError(f"Unknown feature profile: {feature_profile}")
+
+
+def base_value(row: pd.Series, feature: str, feature_map: dict[str, str]) -> float:
+    source = feature_map.get(feature)
     if source is None or source not in row:
         return float("nan")
     value = row[source]
@@ -88,18 +117,30 @@ def base_value(row: pd.Series, feature: str) -> float:
     return float(value)
 
 
-def values_for_training_features(df: pd.DataFrame, feature_names: Sequence[str]) -> tuple[np.ndarray, dict[str, Any]]:
+def values_for_training_features(
+    df: pd.DataFrame,
+    feature_names: Sequence[str],
+    feature_map: dict[str, str],
+    feature_profile: str,
+) -> tuple[np.ndarray, dict[str, Any]]:
     values: list[list[float]] = []
     missing_base_features: set[str] = set()
     missing_full_features: set[str] = set()
+    profile_imputed_features: set[str] = set()
 
     for _, group in df.groupby("session_id", sort=True):
         history: list[dict[str, float]] = []
         for _, row in group.sort_values("epoch_index").iterrows():
-            current_base = {name: base_value(row, name) for name in BASE_FEATURE_MAP}
+            current_base = {name: base_value(row, name, feature_map) for name in feature_map}
             out_row: list[float] = []
             for feature in feature_names:
-                direct = base_value(row, feature)
+                if feature_disabled(feature, feature_profile):
+                    missing_full_features.add(feature)
+                    profile_imputed_features.add(feature)
+                    out_row.append(float("nan"))
+                    continue
+
+                direct = base_value(row, feature, feature_map)
                 if direct == direct:
                     out_row.append(direct)
                     continue
@@ -110,12 +151,12 @@ def values_for_training_features(df: pd.DataFrame, feature_names: Sequence[str])
                 if delta_match is not None:
                     base = delta_match.group("base")
                     lag = int(delta_match.group("lag"))
-                    current = base_value(row, base)
+                    current = base_value(row, base, feature_map)
                     if len(history) >= lag:
                         previous = history[-lag].get(base, float("nan"))
                         if current == current and previous == previous:
                             value = current - previous
-                    if base not in BASE_FEATURE_MAP:
+                    if base not in feature_map:
                         missing_base_features.add(base)
                 elif roll_match is not None:
                     base = roll_match.group("base")
@@ -129,7 +170,7 @@ def values_for_training_features(df: pd.DataFrame, feature_names: Sequence[str])
                         window_values = window_values[np.isfinite(window_values)]
                         if window_values.size:
                             value = float(window_values.mean() if stat == "mean" else window_values.std())
-                    if base not in BASE_FEATURE_MAP:
+                    if base not in feature_map:
                         missing_base_features.add(base)
                 else:
                     missing_full_features.add(feature)
@@ -143,6 +184,8 @@ def values_for_training_features(df: pd.DataFrame, feature_names: Sequence[str])
         "missing_base_features": sorted(missing_base_features),
         "missing_full_feature_count": len(missing_full_features),
         "missing_full_features": sorted(missing_full_features),
+        "profile_imputed_feature_count": len(profile_imputed_features),
+        "profile_imputed_features": sorted(profile_imputed_features),
     }
     return np.asarray(values, dtype=np.float32), report
 
@@ -159,6 +202,7 @@ def sorted_clean_df(path: Path) -> pd.DataFrame:
 def build_context_windows(
     clean_csv: Path,
     train_npz: Path,
+    feature_profile: str,
 ) -> tuple[np.ndarray, pd.DataFrame, dict[str, Any]]:
     df = sorted_clean_df(clean_csv)
     schema = load_train_schema(train_npz)
@@ -167,7 +211,12 @@ def build_context_windows(
     if context_epochs <= 0:
         raise ValueError(f"Invalid context_epochs in {train_npz}: {context_epochs}")
 
-    raw_values, feature_report = values_for_training_features(df, feature_names)
+    raw_values, feature_report = values_for_training_features(
+        df,
+        feature_names,
+        BASE_FEATURE_MAP,
+        feature_profile,
+    )
     mean = schema["mean"].reshape(1, -1)
     std = schema["std"].reshape(1, -1)
     filled = np.where(np.isfinite(raw_values), raw_values, mean)
@@ -197,6 +246,7 @@ def build_context_windows(
         "training_feature_count": int(len(feature_names)),
         "input_epoch_count": int(len(df)),
         "window_count": int(len(windows)),
+        "feature_profile": feature_profile,
         **feature_report,
     }
     return np.stack(windows).astype(np.float32), meta, report
@@ -383,6 +433,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--w20-npz", type=Path, help="DreamT full-w20 temporal context20 NPZ schema.")
     parser.add_argument("--outer-seed", type=int, default=42)
     parser.add_argument("--batch-size", type=int, default=512)
+    parser.add_argument(
+        "--feature-profile",
+        choices=FEATURE_PROFILES,
+        default="current",
+        help=(
+            "current keeps the v4 serving feature map. stable-vitals-v5 imputes "
+            "BVP mean-family features and unstable HR/IBI variability/temporal features."
+        ),
+    )
     parser.add_argument("--session-gap-ms", type=int, default=30_000)
     parser.add_argument("--packet-count-min", type=int, default=216)
     parser.add_argument("--duration-ms-min", type=int, default=25_000)
@@ -431,8 +490,16 @@ def main() -> None:
     )
     check_paths([original_npz, w20_npz])
 
-    x_original, meta_original, original_report = build_context_windows(clean_csv, original_npz)
-    x_w20, meta_w20, w20_report = build_context_windows(clean_csv, w20_npz)
+    x_original, meta_original, original_report = build_context_windows(
+        clean_csv,
+        original_npz,
+        args.feature_profile,
+    )
+    x_w20, meta_w20, w20_report = build_context_windows(
+        clean_csv,
+        w20_npz,
+        args.feature_profile,
+    )
     if not meta_original[["session_id", "epoch_index"]].equals(meta_w20[["session_id", "epoch_index"]]):
         raise ValueError("Original and w20 context windows are not aligned")
 
@@ -557,6 +624,7 @@ def main() -> None:
         "raw_input": str(raw_path) if raw_path is not None else None,
         "output_root": str(output_root),
         "outer_seed": outer_seed,
+        "feature_profile": args.feature_profile,
         "device": str(device),
         "prediction_csv": str(prediction_csv),
         "prediction_npz": str(prediction_npz),
