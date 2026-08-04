@@ -59,7 +59,14 @@ for signal in ("hr", "ibi"):
 
 TEMPORAL_DELTA_RE = re.compile(r"^(?P<base>.+)_delta_(?P<lag>[0-9]+)$")
 TEMPORAL_ROLL_RE = re.compile(r"^(?P<base>.+)_roll_(?P<stat>mean|std)_(?P<window>[0-9]+)$")
-FEATURE_PROFILES = ("current", "stable-vitals-v5")
+FEATURE_PROFILES = (
+    "current",
+    "stable-vitals-v5",
+    "v6-a-bvp-mean-kept",
+    "v6-b-hribi-rollmean-kept",
+    "v6-c-hribi-no-slope",
+    "v6-d-bvp-mean-imputed",
+)
 
 
 def find_existing(paths: Sequence[Path], label: str) -> Path:
@@ -79,24 +86,64 @@ def load_train_schema(npz_path: Path) -> dict[str, np.ndarray]:
         }
 
 
-def stable_vitals_v5_disabled(feature: str) -> bool:
+def split_temporal_feature(feature: str) -> tuple[str, str | None, str | None]:
     delta_match = TEMPORAL_DELTA_RE.match(feature)
     roll_match = TEMPORAL_ROLL_RE.match(feature)
     if delta_match is not None:
-        base = delta_match.group("base")
-    elif roll_match is not None:
-        base = roll_match.group("base")
-    else:
-        base = feature
+        return delta_match.group("base"), "delta", None
+    if roll_match is not None:
+        return roll_match.group("base"), "roll", roll_match.group("stat")
+    return feature, None, None
 
+
+def stable_vitals_v5_disabled(feature: str) -> bool:
+    base, temporal_kind, _ = split_temporal_feature(feature)
     if base == "bvp_mean":
         return True
     if base.startswith("hr_") or base.startswith("ibi_"):
-        if delta_match is not None or roll_match is not None:
+        if temporal_kind is not None:
             return True
         suffix = base.split("_", 1)[1]
         return suffix not in {"mean", "median", "min", "max"}
     return False
+
+
+def v6_a_bvp_mean_kept_disabled(feature: str) -> bool:
+    base, temporal_kind, _ = split_temporal_feature(feature)
+    if base.startswith("hr_") or base.startswith("ibi_"):
+        if temporal_kind is not None:
+            return True
+        suffix = base.split("_", 1)[1]
+        return suffix not in {"mean", "median", "min", "max"}
+    return False
+
+
+def v6_b_hribi_rollmean_kept_disabled(feature: str) -> bool:
+    base, temporal_kind, roll_stat = split_temporal_feature(feature)
+    if base == "bvp_mean":
+        return True
+    if base.startswith("hr_") or base.startswith("ibi_"):
+        suffix = base.split("_", 1)[1]
+        if temporal_kind == "roll":
+            return not (suffix == "mean" and roll_stat == "mean")
+        if temporal_kind == "delta":
+            return True
+        return suffix not in {"mean", "median", "min", "max"}
+    return False
+
+
+def v6_c_hribi_no_slope_disabled(feature: str) -> bool:
+    base, _, _ = split_temporal_feature(feature)
+    if base == "bvp_mean":
+        return True
+    if base in {"hr_slope", "ibi_slope"}:
+        return True
+    return False
+
+
+def v6_d_bvp_mean_imputed_disabled(feature: str) -> bool:
+    base, _, _ = split_temporal_feature(feature)
+    return base == "bvp_mean"
 
 
 def feature_disabled(feature: str, feature_profile: str) -> bool:
@@ -104,6 +151,14 @@ def feature_disabled(feature: str, feature_profile: str) -> bool:
         return False
     if feature_profile == "stable-vitals-v5":
         return stable_vitals_v5_disabled(feature)
+    if feature_profile == "v6-a-bvp-mean-kept":
+        return v6_a_bvp_mean_kept_disabled(feature)
+    if feature_profile == "v6-b-hribi-rollmean-kept":
+        return v6_b_hribi_rollmean_kept_disabled(feature)
+    if feature_profile == "v6-c-hribi-no-slope":
+        return v6_c_hribi_no_slope_disabled(feature)
+    if feature_profile == "v6-d-bvp-mean-imputed":
+        return v6_d_bvp_mean_imputed_disabled(feature)
     raise ValueError(f"Unknown feature profile: {feature_profile}")
 
 
@@ -439,7 +494,8 @@ def parse_args() -> argparse.Namespace:
         default="current",
         help=(
             "current keeps the v4 serving feature map. stable-vitals-v5 imputes "
-            "BVP mean-family features and unstable HR/IBI variability/temporal features."
+            "BVP mean-family features and unstable HR/IBI variability/temporal features. "
+            "v6-* profiles isolate BVP mean-family and HR/IBI variability effects."
         ),
     )
     parser.add_argument("--session-gap-ms", type=int, default=30_000)
