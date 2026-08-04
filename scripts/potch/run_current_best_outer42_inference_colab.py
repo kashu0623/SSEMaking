@@ -46,9 +46,6 @@ BASE_FEATURE_MAP = {
     "bvp_min": "ppg_min",
     "bvp_max": "ppg_max",
     "bvp_slope": "ppg_slope",
-    "bvp_missing_ratio": "ppg_missing_ratio",
-    "bvp_flatline_ratio": "ppg_flatline_ratio",
-    "bvp_edge_ratio": "ppg_edge_ratio",
 }
 
 for axis in ("x", "y", "z", "vm"):
@@ -57,8 +54,6 @@ for axis in ("x", "y", "z", "vm"):
 BASE_FEATURE_MAP["acc_vm_activity"] = "acc_vm_activity"
 for signal in ("hr", "ibi"):
     for suffix in ("mean", "std", "median", "iqr", "min", "max", "slope"):
-        BASE_FEATURE_MAP[f"{signal}_{suffix}"] = f"{signal}_{suffix}"
-    for suffix in ("missing_ratio", "flatline_ratio", "edge_ratio"):
         BASE_FEATURE_MAP[f"{signal}_{suffix}"] = f"{signal}_{suffix}"
 
 

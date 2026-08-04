@@ -19,6 +19,9 @@ from .features import basic_stats, quality_features
 RECORD_BYTES = 150
 MAGIC = 0x5AA5
 EPOCH_MS = 30_000
+ACC_RAW_SCALE = 256.0
+PPG_AC_SCALE = 10.0
+IBI_MS_PER_SECOND = 1000.0
 
 IMU_AXES = ("acc_x", "acc_y", "acc_z", "gyro_x", "gyro_y", "gyro_z")
 FEATURE_COLUMNS = (
@@ -242,15 +245,26 @@ def flattened_imu_axis(packets: Sequence[PotchPacket], axis_index: int) -> list[
     return [sample[axis_index] for packet in packets for sample in packet.imu]
 
 
+def flattened_acc_axis(packets: Sequence[PotchPacket], axis_index: int) -> list[float]:
+    return [sample[axis_index] / ACC_RAW_SCALE for packet in packets for sample in packet.imu]
+
+
 def flatten_ppg(packets: Sequence[PotchPacket]) -> list[int]:
     return [value for packet in packets for value in packet.ppg]
+
+
+def centered_ppg_proxy(ppg_values: Sequence[int]) -> list[float]:
+    if not ppg_values:
+        return []
+    baseline = statistics.median(ppg_values)
+    return [(float(value) - baseline) / PPG_AC_SCALE for value in ppg_values]
 
 
 def flattened_acc_vm(packets: Sequence[PotchPacket]) -> list[float]:
     values: list[float] = []
     for packet in packets:
         for sample in packet.imu:
-            acc_x, acc_y, acc_z = sample[:3]
+            acc_x, acc_y, acc_z = (value / ACC_RAW_SCALE for value in sample[:3])
             values.append(math.sqrt(acc_x * acc_x + acc_y * acc_y + acc_z * acc_z))
     return values
 
@@ -334,8 +348,8 @@ def ppg_derived_hr_ibi(ppg_values: Sequence[int], duration_ms: int) -> tuple[lis
     for before, after in zip(peaks, peaks[1:], strict=False):
         ibi_ms = (after - before) / sample_rate_hz * 1000.0
         if 300.0 <= ibi_ms <= 2000.0:
-            ibi_values.append(ibi_ms)
-    hr_values = [60000.0 / ibi_ms for ibi_ms in ibi_values if ibi_ms > 0]
+            ibi_values.append(ibi_ms / IBI_MS_PER_SECOND)
+    hr_values = [60.0 / ibi_seconds for ibi_seconds in ibi_values if ibi_seconds > 0]
     report = {
         "peak_count": len(peaks),
         "valid_ibi_count": len(ibi_values),
@@ -389,19 +403,25 @@ def epoch_row(session_id: int, epoch_index: int, packets: Sequence[PotchPacket],
         row[f"{name}_mean"] = stats["mean"]
         row[f"{name}_min"] = stats["min"]
         row[f"{name}_max"] = stats["max"]
-    ppg_values = flatten_ppg(packets)
-    for suffix, value in stats_for_raw(ppg_values, "ppg").items():
+    ppg_raw_values = flatten_ppg(packets)
+    ppg_model_values = centered_ppg_proxy(ppg_raw_values)
+    for suffix, value in stats_for_raw(ppg_model_values, "ppg").items():
         row[f"ppg_{suffix}"] = value
-    for suffix, value in quality_for_raw(ppg_values, "ppg").items():
+    for suffix, value in quality_for_raw(ppg_raw_values, "ppg").items():
         row[f"ppg_{suffix}"] = value
     for axis_index, axis_name in enumerate(IMU_AXES):
-        for suffix, value in stats_for_raw(flattened_imu_axis(packets, axis_index), axis_name).items():
+        axis_values = (
+            flattened_acc_axis(packets, axis_index)
+            if axis_name.startswith("acc_")
+            else flattened_imu_axis(packets, axis_index)
+        )
+        for suffix, value in stats_for_raw(axis_values, axis_name).items():
             row[f"{axis_name}_{suffix}"] = value
     acc_vm_values = flattened_acc_vm(packets)
     for suffix, value in stats_for_raw(acc_vm_values, "acc_vm").items():
         row[f"acc_vm_{suffix}"] = value
     row["acc_vm_activity"] = activity(acc_vm_values)
-    hr_values, ibi_values, ppg_derived_report = ppg_derived_hr_ibi(ppg_values, duration_ms)
+    hr_values, ibi_values, ppg_derived_report = ppg_derived_hr_ibi(ppg_raw_values, duration_ms)
     for prefix, values in (("hr", hr_values), ("ibi", ibi_values)):
         for suffix, value in stats_for_raw(values, prefix).items():
             row[f"{prefix}_{suffix}"] = value
