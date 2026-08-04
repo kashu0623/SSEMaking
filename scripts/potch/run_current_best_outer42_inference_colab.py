@@ -55,6 +55,11 @@ for axis in ("x", "y", "z", "vm"):
     for suffix in ("mean", "std", "median", "iqr", "min", "max", "slope"):
         BASE_FEATURE_MAP[f"acc_{axis}_{suffix}"] = f"acc_{axis}_{suffix}"
 BASE_FEATURE_MAP["acc_vm_activity"] = "acc_vm_activity"
+for signal in ("hr", "ibi"):
+    for suffix in ("mean", "std", "median", "iqr", "min", "max", "slope"):
+        BASE_FEATURE_MAP[f"{signal}_{suffix}"] = f"{signal}_{suffix}"
+    for suffix in ("missing_ratio", "flatline_ratio", "edge_ratio"):
+        BASE_FEATURE_MAP[f"{signal}_{suffix}"] = f"{signal}_{suffix}"
 
 
 TEMPORAL_DELTA_RE = re.compile(r"^(?P<base>.+)_delta_(?P<lag>[0-9]+)$")

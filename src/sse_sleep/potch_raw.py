@@ -67,6 +67,26 @@ FEATURE_COLUMNS = (
     "acc_vm_max",
     "acc_vm_slope",
     "acc_vm_activity",
+    "hr_mean",
+    "hr_std",
+    "hr_median",
+    "hr_iqr",
+    "hr_min",
+    "hr_max",
+    "hr_slope",
+    "hr_missing_ratio",
+    "hr_flatline_ratio",
+    "hr_edge_ratio",
+    "ibi_mean",
+    "ibi_std",
+    "ibi_median",
+    "ibi_iqr",
+    "ibi_min",
+    "ibi_max",
+    "ibi_slope",
+    "ibi_missing_ratio",
+    "ibi_flatline_ratio",
+    "ibi_edge_ratio",
     "gyro_x_mean",
     "gyro_x_std",
     "gyro_x_median",
@@ -242,12 +262,94 @@ def activity(values: Sequence[float]) -> float | None:
     return movement / (len(values) - 1)
 
 
-def stats_for_raw(values: Iterable[int], prefix: str) -> dict[str, float | None]:
+def moving_average(values: Sequence[float], window: int) -> list[float]:
+    if window <= 1 or not values:
+        return [float(value) for value in values]
+    half = window // 2
+    smoothed: list[float] = []
+    prefix = [0.0]
+    for value in values:
+        prefix.append(prefix[-1] + float(value))
+    for index in range(len(values)):
+        start = max(0, index - half)
+        end = min(len(values), index + half + 1)
+        smoothed.append((prefix[end] - prefix[start]) / (end - start))
+    return smoothed
+
+
+def quantile(values: Sequence[float], q: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    position = (len(ordered) - 1) * q
+    lower = math.floor(position)
+    upper = math.ceil(position)
+    if lower == upper:
+        return ordered[lower]
+    weight = position - lower
+    return ordered[lower] * (1 - weight) + ordered[upper] * weight
+
+
+def detect_ppg_peak_indices(ppg_values: Sequence[int], sample_rate_hz: float) -> list[int]:
+    if len(ppg_values) < 3 or sample_rate_hz <= 0:
+        return []
+    smooth_window = max(3, int(round(sample_rate_hz * 0.06)))
+    baseline_window = max(smooth_window + 2, int(round(sample_rate_hz * 0.75)))
+    smoothed = moving_average([float(value) for value in ppg_values], smooth_window)
+    baseline = moving_average(smoothed, baseline_window)
+    detrended = [value - base for value, base in zip(smoothed, baseline, strict=True)]
+    ordered = sorted(detrended)
+    median = statistics.median(ordered)
+    q75 = quantile(ordered, 0.75) or median
+    q25 = quantile(ordered, 0.25) or median
+    robust_spread = max(q75 - q25, statistics.pstdev(detrended), 1.0)
+    threshold = median + 0.35 * robust_spread
+    min_distance = max(1, int(round(sample_rate_hz * 0.30)))
+
+    candidates: list[int] = []
+    for index in range(1, len(detrended) - 1):
+        if (
+            detrended[index] > threshold
+            and detrended[index] >= detrended[index - 1]
+            and detrended[index] > detrended[index + 1]
+        ):
+            candidates.append(index)
+
+    selected: list[int] = []
+    for index in candidates:
+        if not selected or index - selected[-1] >= min_distance:
+            selected.append(index)
+            continue
+        if detrended[index] > detrended[selected[-1]]:
+            selected[-1] = index
+    return selected
+
+
+def ppg_derived_hr_ibi(ppg_values: Sequence[int], duration_ms: int) -> tuple[list[float], list[float], dict[str, float | int]]:
+    if duration_ms <= 0 or len(ppg_values) < 3:
+        return [], [], {"peak_count": 0, "valid_ibi_count": 0, "sample_rate_hz": 0.0}
+    sample_rate_hz = len(ppg_values) / (duration_ms / 1000.0)
+    peaks = detect_ppg_peak_indices(ppg_values, sample_rate_hz)
+    ibi_values: list[float] = []
+    for before, after in zip(peaks, peaks[1:], strict=False):
+        ibi_ms = (after - before) / sample_rate_hz * 1000.0
+        if 300.0 <= ibi_ms <= 2000.0:
+            ibi_values.append(ibi_ms)
+    hr_values = [60000.0 / ibi_ms for ibi_ms in ibi_values if ibi_ms > 0]
+    report = {
+        "peak_count": len(peaks),
+        "valid_ibi_count": len(ibi_values),
+        "sample_rate_hz": sample_rate_hz,
+    }
+    return hr_values, ibi_values, report
+
+
+def stats_for_raw(values: Iterable[int | float], prefix: str) -> dict[str, float | None]:
     stats = basic_stats(values, prefix)
     return {key.removeprefix(f"{prefix}_"): value for key, value in stats.items()}
 
 
-def quality_for_raw(values: Sequence[int], prefix: str) -> dict[str, float | None]:
+def quality_for_raw(values: Sequence[int | float], prefix: str) -> dict[str, float | None]:
     features = quality_features(values, prefix)
     return {key.removeprefix(f"{prefix}_"): value for key, value in features.items()}
 
@@ -299,6 +401,15 @@ def epoch_row(session_id: int, epoch_index: int, packets: Sequence[PotchPacket],
     for suffix, value in stats_for_raw(acc_vm_values, "acc_vm").items():
         row[f"acc_vm_{suffix}"] = value
     row["acc_vm_activity"] = activity(acc_vm_values)
+    hr_values, ibi_values, ppg_derived_report = ppg_derived_hr_ibi(ppg_values, duration_ms)
+    for prefix, values in (("hr", hr_values), ("ibi", ibi_values)):
+        for suffix, value in stats_for_raw(values, prefix).items():
+            row[f"{prefix}_{suffix}"] = value
+        for suffix, value in quality_for_raw(values, prefix).items():
+            row[f"{prefix}_{suffix}"] = value
+    row["ppg_peak_count"] = ppg_derived_report["peak_count"]
+    row["ppg_valid_ibi_count"] = ppg_derived_report["valid_ibi_count"]
+    row["ppg_sample_rate_hz"] = ppg_derived_report["sample_rate_hz"]
     quality_pass = (
         len(packets) >= quality.packet_count_min
         and duration_ms >= quality.duration_ms_min
