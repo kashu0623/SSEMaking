@@ -181,7 +181,13 @@ def read_raw_payload(path: Path) -> tuple[bytes, str]:
     """Read a .bin file or a zip that contains exactly one .bin payload."""
     if path.suffix.lower() == ".zip":
         with zipfile.ZipFile(path) as archive:
-            bin_names = [name for name in archive.namelist() if name.lower().endswith(".bin")]
+            bin_names = [
+                name
+                for name in archive.namelist()
+                if name.lower().endswith(".bin")
+                and "__MACOSX/" not in name
+                and not Path(name).name.startswith("._")
+            ]
             if len(bin_names) != 1:
                 raise ValueError(f"Expected exactly one .bin in {path}, found {bin_names}")
             return archive.read(bin_names[0]), bin_names[0]
@@ -216,17 +222,31 @@ def parse_packets(path: Path) -> tuple[list[PotchPacket], dict[str, Any]]:
         raise ValueError(
             f"Raw payload length {len(payload)} is not divisible by {RECORD_BYTES}"
         )
-    packets = [
-        parse_packet(payload, offset)
-        for offset in range(0, len(payload), RECORD_BYTES)
-    ]
+    packets: list[PotchPacket] = []
+    bad_records: list[dict[str, Any]] = []
+    for record_index, offset in enumerate(range(0, len(payload), RECORD_BYTES)):
+        try:
+            packets.append(parse_packet(payload, offset))
+        except ValueError as error:
+            bad_records.append(
+                {
+                    "record_index": record_index,
+                    "offset": offset,
+                    "error": str(error),
+                }
+            )
+    if not packets:
+        raise ValueError(f"No valid Potch packets found in {path}")
     packets.sort(key=lambda packet: (packet.app_ts_ms, packet.seq))
     report = {
         "source_path": str(path),
         "payload_name": payload_name,
         "payload_bytes": len(payload),
         "record_bytes": RECORD_BYTES,
+        "record_count": len(payload) // RECORD_BYTES,
         "packet_count": len(packets),
+        "bad_record_count": len(bad_records),
+        "bad_record_examples": bad_records[:20],
     }
     return packets, report
 
