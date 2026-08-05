@@ -18,6 +18,7 @@ from scripts.potch.run_current_best_outer42_inference_colab import (
     HR_IBI_FEATURE_SOURCES,
     HR_IBI_SLOPE_SOURCES,
     TEMP_FEATURE_SOURCES,
+    TEMP_SLOPE_SOURCES,
     find_existing,
 )
 from sse_sleep.potch_raw import PPG_AC_SCALE, PPG_TRANSFORMS, QualityFilter, build_potch_epoch_features
@@ -100,6 +101,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--hr-ibi-slope-source", choices=HR_IBI_SLOPE_SOURCES, default="current")
     parser.add_argument("--hr-ibi-feature-source", choices=HR_IBI_FEATURE_SOURCES, default="current")
     parser.add_argument("--temp-feature-source", choices=TEMP_FEATURE_SOURCES, default="none")
+    parser.add_argument("--temp-slope-source", choices=TEMP_SLOPE_SOURCES, default="current")
     parser.add_argument("--ppg-transforms", choices=PPG_TRANSFORMS, nargs="+", default=list(PPG_TRANSFORMS))
     parser.add_argument("--ppg-scale", type=float, default=PPG_AC_SCALE)
     parser.add_argument("--session-gap-ms", type=int, default=30_000)
@@ -159,6 +161,7 @@ def main() -> None:
             args.hr_ibi_slope_source,
             args.hr_ibi_feature_source,
             args.temp_feature_source,
+            args.temp_slope_source,
         )
         w20 = audit_schema(
             clean_csv,
@@ -167,6 +170,7 @@ def main() -> None:
             args.hr_ibi_slope_source,
             args.hr_ibi_feature_source,
             args.temp_feature_source,
+            args.temp_slope_source,
         )
         candidates[transform] = {
             "clean_csv": str(clean_csv),
@@ -184,6 +188,7 @@ def main() -> None:
         "hr_ibi_feature_source": args.hr_ibi_feature_source,
         "hr_ibi_slope_source": args.hr_ibi_slope_source,
         "temp_feature_source": args.temp_feature_source,
+        "temp_slope_source": args.temp_slope_source,
         "ppg_scale": args.ppg_scale,
         "transforms": list(args.ppg_transforms),
         "candidates": candidates,
@@ -196,6 +201,7 @@ def main() -> None:
         "hr_ibi_feature_source": args.hr_ibi_feature_source,
         "hr_ibi_slope_source": args.hr_ibi_slope_source,
         "temp_feature_source": args.temp_feature_source,
+        "temp_slope_source": args.temp_slope_source,
         "ppg_scale": args.ppg_scale,
         "candidate_scores": {
             transform: {

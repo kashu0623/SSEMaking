@@ -70,6 +70,7 @@ FEATURE_PROFILES = (
 HR_IBI_SLOPE_SOURCES = ("current", "v2")
 HR_IBI_FEATURE_SOURCES = ("current", "v2")
 TEMP_FEATURE_SOURCES = ("none", "ntc-beta")
+TEMP_SLOPE_SOURCES = ("current", "v2")
 
 
 def find_existing(paths: Sequence[Path], label: str) -> Path:
@@ -169,6 +170,7 @@ def build_feature_map(
     hr_ibi_slope_source: str,
     hr_ibi_feature_source: str = "current",
     temp_feature_source: str = "none",
+    temp_slope_source: str = "current",
 ) -> dict[str, str]:
     if hr_ibi_slope_source not in HR_IBI_SLOPE_SOURCES:
         raise ValueError(f"Unknown HR/IBI slope source: {hr_ibi_slope_source}")
@@ -176,6 +178,8 @@ def build_feature_map(
         raise ValueError(f"Unknown HR/IBI feature source: {hr_ibi_feature_source}")
     if temp_feature_source not in TEMP_FEATURE_SOURCES:
         raise ValueError(f"Unknown temp feature source: {temp_feature_source}")
+    if temp_slope_source not in TEMP_SLOPE_SOURCES:
+        raise ValueError(f"Unknown temp slope source: {temp_slope_source}")
     feature_map = dict(BASE_FEATURE_MAP)
     if hr_ibi_feature_source == "v2":
         for signal in ("hr", "ibi"):
@@ -187,6 +191,8 @@ def build_feature_map(
     if temp_feature_source == "ntc-beta":
         for suffix in ("mean", "std", "median", "iqr", "min", "max", "slope", "baseline_delta"):
             feature_map[f"temp_{suffix}"] = f"temp_{suffix}"
+        if temp_slope_source == "v2":
+            feature_map["temp_slope"] = "temp_slope_v2"
     return feature_map
 
 
@@ -289,6 +295,7 @@ def build_context_windows(
     hr_ibi_slope_source: str,
     hr_ibi_feature_source: str,
     temp_feature_source: str,
+    temp_slope_source: str,
 ) -> tuple[np.ndarray, pd.DataFrame, dict[str, Any]]:
     df = sorted_clean_df(clean_csv)
     schema = load_train_schema(train_npz)
@@ -300,7 +307,12 @@ def build_context_windows(
     raw_values, feature_report = values_for_training_features(
         df,
         feature_names,
-        build_feature_map(hr_ibi_slope_source, hr_ibi_feature_source, temp_feature_source),
+        build_feature_map(
+            hr_ibi_slope_source,
+            hr_ibi_feature_source,
+            temp_feature_source,
+            temp_slope_source,
+        ),
         feature_profile,
     )
     mean = schema["mean"].reshape(1, -1)
@@ -336,6 +348,7 @@ def build_context_windows(
         "hr_ibi_feature_source": hr_ibi_feature_source,
         "hr_ibi_slope_source": hr_ibi_slope_source,
         "temp_feature_source": temp_feature_source,
+        "temp_slope_source": temp_slope_source,
         **feature_report,
     }
     return np.stack(windows).astype(np.float32), meta, report
@@ -556,6 +569,12 @@ def parse_args() -> argparse.Namespace:
         default="none",
         help="none imputes DreamT temp features. ntc-beta maps Potch NTC raw through the 104JT-025 beta equation.",
     )
+    parser.add_argument(
+        "--temp-slope-source",
+        choices=TEMP_SLOPE_SOURCES,
+        default="current",
+        help="current uses packet-level temp slope. v2 maps DreamT temp_slope to a 100Hz-denominator slope.",
+    )
     parser.add_argument("--session-gap-ms", type=int, default=30_000)
     parser.add_argument("--ppg-transform", choices=PPG_TRANSFORMS, default="epoch-median")
     parser.add_argument("--ppg-scale", type=float, default=PPG_AC_SCALE)
@@ -615,6 +634,7 @@ def main() -> None:
         args.hr_ibi_slope_source,
         args.hr_ibi_feature_source,
         args.temp_feature_source,
+        args.temp_slope_source,
     )
     x_w20, meta_w20, w20_report = build_context_windows(
         clean_csv,
@@ -623,6 +643,7 @@ def main() -> None:
         args.hr_ibi_slope_source,
         args.hr_ibi_feature_source,
         args.temp_feature_source,
+        args.temp_slope_source,
     )
     if not meta_original[["session_id", "epoch_index"]].equals(meta_w20[["session_id", "epoch_index"]]):
         raise ValueError("Original and w20 context windows are not aligned")
@@ -752,6 +773,7 @@ def main() -> None:
         "hr_ibi_feature_source": args.hr_ibi_feature_source,
         "hr_ibi_slope_source": args.hr_ibi_slope_source,
         "temp_feature_source": args.temp_feature_source,
+        "temp_slope_source": args.temp_slope_source,
         "ppg_transform": args.ppg_transform,
         "ppg_scale": args.ppg_scale,
         "device": str(device),

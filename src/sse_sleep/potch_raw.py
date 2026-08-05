@@ -55,6 +55,7 @@ FEATURE_COLUMNS = (
     "temp_min",
     "temp_max",
     "temp_slope",
+    "temp_slope_v2",
     "temp_baseline_delta",
     "ppg_mean",
     "ppg_std",
@@ -627,6 +628,7 @@ def epoch_row(
         if (converted := ntc_raw_to_celsius(packet.ntc_raw)) is not None
     ]
     row.update(temp_epoch_features(temp_values, temp_session_baseline))
+    row["temp_slope_v2"] = dreamt_grid_slope_v2(temp_values, duration_ms)
     ppg_raw_values = flatten_ppg(packets)
     ppg_model_values = flatten_ppg_proxy(packets, ppg_model_by_packet, ppg_scale)
     for suffix, value in stats_for_raw(ppg_model_values, "ppg").items():
