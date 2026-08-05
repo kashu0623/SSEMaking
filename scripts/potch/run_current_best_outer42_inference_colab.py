@@ -22,7 +22,7 @@ from sse_sleep.evaluate_direct4_hybrid_deep_fusion import current_probs_to_four,
 from sse_sleep.evaluate_direct4_source_blend_hybrid import blend_direct4_sources
 from sse_sleep.evaluate_four_model_fusion import build_grouped_class_weights, four_model_classwise_fusion
 from sse_sleep.evaluate_light_deep_specialist_fusion import fuse_light_deep_conditional
-from sse_sleep.potch_raw import QualityFilter, build_potch_epoch_features
+from sse_sleep.potch_raw import PPG_AC_SCALE, PPG_TRANSFORMS, QualityFilter, build_potch_epoch_features
 from sse_sleep.train_lstm import RecurrentSleepClassifier
 from sse_sleep.export_lstm_predictions import normalize_state_dict_keys
 
@@ -499,6 +499,8 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument("--session-gap-ms", type=int, default=30_000)
+    parser.add_argument("--ppg-transform", choices=PPG_TRANSFORMS, default="epoch-median")
+    parser.add_argument("--ppg-scale", type=float, default=PPG_AC_SCALE)
     parser.add_argument("--packet-count-min", type=int, default=216)
     parser.add_argument("--duration-ms-min", type=int, default=25_000)
     parser.add_argument("--seq-gap-count-required", type=int, default=0)
@@ -522,6 +524,8 @@ def main() -> None:
             summary_json=args.out_dir / "potch_epoch_feature_summary.json",
             clean_npz=args.out_dir / "potch_clean_epoch_features.npz",
             session_gap_ms=args.session_gap_ms,
+            ppg_transform=args.ppg_transform,
+            ppg_scale=args.ppg_scale,
             quality=QualityFilter(
                 packet_count_min=args.packet_count_min,
                 duration_ms_min=args.duration_ms_min,
@@ -681,6 +685,8 @@ def main() -> None:
         "output_root": str(output_root),
         "outer_seed": outer_seed,
         "feature_profile": args.feature_profile,
+        "ppg_transform": args.ppg_transform,
+        "ppg_scale": args.ppg_scale,
         "device": str(device),
         "prediction_csv": str(prediction_csv),
         "prediction_npz": str(prediction_npz),

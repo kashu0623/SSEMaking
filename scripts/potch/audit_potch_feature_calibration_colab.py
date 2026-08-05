@@ -16,12 +16,14 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.potch.run_current_best_outer42_inference_colab import (
+    BASE_FEATURE_MAP,
+    FEATURE_PROFILES,
     find_existing,
     load_train_schema,
     sorted_clean_df,
     values_for_training_features,
 )
-from sse_sleep.potch_raw import QualityFilter, build_potch_epoch_features
+from sse_sleep.potch_raw import PPG_AC_SCALE, PPG_TRANSFORMS, QualityFilter, build_potch_epoch_features
 
 
 def quantile(values: np.ndarray, q: float) -> float | None:
@@ -94,12 +96,17 @@ def summarize_feature(
     }
 
 
-def audit_schema(clean_csv: Path, train_npz: Path) -> dict[str, Any]:
+def audit_schema(clean_csv: Path, train_npz: Path, feature_profile: str) -> dict[str, Any]:
     df = sorted_clean_df(clean_csv)
     schema = load_train_schema(train_npz)
     feature_names = schema["feature_names"].astype(str)
     context_epochs = int(schema["context_epochs"])
-    raw_values, feature_report = values_for_training_features(df, feature_names)
+    raw_values, feature_report = values_for_training_features(
+        df,
+        feature_names,
+        BASE_FEATURE_MAP,
+        feature_profile,
+    )
 
     windows: list[np.ndarray] = []
     meta_rows = []
@@ -184,6 +191,7 @@ def audit_schema(clean_csv: Path, train_npz: Path) -> dict[str, Any]:
             "training_feature_count": int(len(feature_names)),
             "input_epoch_count": int(len(df)),
             "window_count": int(raw_windows.shape[0]),
+            "feature_profile": feature_profile,
             **feature_report,
         },
         "meta": {
@@ -208,7 +216,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--out-dir", type=Path, default=Path("/content/drive/MyDrive/SSE_outputs/potch_feature_audit"))
     parser.add_argument("--original-npz", type=Path)
     parser.add_argument("--w20-npz", type=Path)
+    parser.add_argument("--feature-profile", choices=FEATURE_PROFILES, default="current")
     parser.add_argument("--session-gap-ms", type=int, default=30_000)
+    parser.add_argument("--ppg-transform", choices=PPG_TRANSFORMS, default="epoch-median")
+    parser.add_argument("--ppg-scale", type=float, default=PPG_AC_SCALE)
     parser.add_argument("--packet-count-min", type=int, default=216)
     parser.add_argument("--duration-ms-min", type=int, default=25_000)
     parser.add_argument("--seq-gap-count-required", type=int, default=0)
@@ -230,6 +241,8 @@ def main() -> None:
             summary_json=args.out_dir / "potch_epoch_feature_summary.json",
             clean_npz=args.out_dir / "potch_clean_epoch_features.npz",
             session_gap_ms=args.session_gap_ms,
+            ppg_transform=args.ppg_transform,
+            ppg_scale=args.ppg_scale,
             quality=QualityFilter(
                 packet_count_min=args.packet_count_min,
                 duration_ms_min=args.duration_ms_min,
@@ -257,9 +270,12 @@ def main() -> None:
     report = {
         "clean_csv": str(clean_csv),
         "raw_input": str(raw_path) if raw_path is not None else None,
+        "feature_profile": args.feature_profile,
+        "ppg_transform": args.ppg_transform,
+        "ppg_scale": args.ppg_scale,
         "raw_feature_report": raw_report,
-        "original": audit_schema(clean_csv, original_npz),
-        "w20": audit_schema(clean_csv, w20_npz),
+        "original": audit_schema(clean_csv, original_npz, args.feature_profile),
+        "w20": audit_schema(clean_csv, w20_npz, args.feature_profile),
     }
     out_json = args.out_dir / "potch_feature_calibration_audit.json"
     out_json.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

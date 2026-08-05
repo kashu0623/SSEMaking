@@ -22,6 +22,14 @@ EPOCH_MS = 30_000
 ACC_RAW_SCALE = 256.0
 PPG_AC_SCALE = 10.0
 IBI_MS_PER_SECOND = 1000.0
+PPG_TRANSFORMS = (
+    "epoch-median",
+    "rolling-mean-8s",
+    "rolling-mean-15s",
+    "rolling-mean-30s",
+    "highpass-lowpass-15s",
+    "highpass-lowpass-30s",
+)
 
 IMU_AXES = ("acc_x", "acc_y", "acc_z", "gyro_x", "gyro_y", "gyro_z")
 FEATURE_COLUMNS = (
@@ -253,11 +261,85 @@ def flatten_ppg(packets: Sequence[PotchPacket]) -> list[int]:
     return [value for packet in packets for value in packet.ppg]
 
 
-def centered_ppg_proxy(ppg_values: Sequence[int]) -> list[float]:
+def packet_key(packet: PotchPacket) -> tuple[int, int]:
+    return packet.app_ts_ms, packet.seq
+
+
+def centered_ppg_proxy(ppg_values: Sequence[int | float], scale: float = PPG_AC_SCALE) -> list[float]:
     if not ppg_values:
         return []
     baseline = statistics.median(ppg_values)
-    return [(float(value) - baseline) / PPG_AC_SCALE for value in ppg_values]
+    return [(float(value) - baseline) / scale for value in ppg_values]
+
+
+def session_sample_rate_hz(packets: Sequence[PotchPacket], sample_count: int) -> float:
+    if len(packets) < 2:
+        return 0.0
+    duration_seconds = (packets[-1].app_ts_ms - packets[0].app_ts_ms) / 1000.0
+    if duration_seconds <= 0:
+        return 0.0
+    return sample_count / duration_seconds
+
+
+def seconds_from_transform(transform: str, default: float) -> float:
+    if transform.endswith("8s"):
+        return 8.0
+    if transform.endswith("15s"):
+        return 15.0
+    if transform.endswith("30s"):
+        return 30.0
+    return default
+
+
+def session_ppg_proxy(
+    packets: Sequence[PotchPacket],
+    transform: str,
+    scale: float = PPG_AC_SCALE,
+) -> dict[tuple[int, int], list[float]] | None:
+    if transform == "epoch-median":
+        return None
+    if transform not in PPG_TRANSFORMS:
+        raise ValueError(f"Unknown PPG transform: {transform}")
+
+    raw_values = [float(value) for packet in packets for value in packet.ppg]
+    if not raw_values:
+        return {packet_key(packet): [] for packet in packets}
+    sample_rate_hz = session_sample_rate_hz(packets, len(raw_values))
+    if sample_rate_hz <= 0:
+        transformed = centered_ppg_proxy(raw_values, scale)
+    else:
+        baseline_seconds = seconds_from_transform(transform, 15.0)
+        baseline_window = max(3, int(round(sample_rate_hz * baseline_seconds)))
+        baseline = moving_average(raw_values, baseline_window)
+        transformed = [
+            (value - base) / scale
+            for value, base in zip(raw_values, baseline, strict=True)
+        ]
+        if transform.startswith("highpass-lowpass"):
+            lowpass_window = max(3, int(round(sample_rate_hz * 0.15)))
+            transformed = moving_average(transformed, lowpass_window)
+
+    by_packet: dict[tuple[int, int], list[float]] = {}
+    offset = 0
+    for packet in packets:
+        count = len(packet.ppg)
+        by_packet[packet_key(packet)] = transformed[offset : offset + count]
+        offset += count
+    return by_packet
+
+
+def flatten_ppg_proxy(
+    packets: Sequence[PotchPacket],
+    ppg_model_by_packet: dict[tuple[int, int], list[float]] | None,
+    ppg_scale: float,
+) -> list[float]:
+    if ppg_model_by_packet is None:
+        return centered_ppg_proxy(flatten_ppg(packets), ppg_scale)
+    return [
+        value
+        for packet in packets
+        for value in ppg_model_by_packet.get(packet_key(packet), [])
+    ]
 
 
 def flattened_acc_vm(packets: Sequence[PotchPacket]) -> list[float]:
@@ -304,7 +386,7 @@ def quantile(values: Sequence[float], q: float) -> float | None:
     return ordered[lower] * (1 - weight) + ordered[upper] * weight
 
 
-def detect_ppg_peak_indices(ppg_values: Sequence[int], sample_rate_hz: float) -> list[int]:
+def detect_ppg_peak_indices(ppg_values: Sequence[int | float], sample_rate_hz: float) -> list[int]:
     if len(ppg_values) < 3 or sample_rate_hz <= 0:
         return []
     smooth_window = max(3, int(round(sample_rate_hz * 0.06)))
@@ -339,7 +421,7 @@ def detect_ppg_peak_indices(ppg_values: Sequence[int], sample_rate_hz: float) ->
     return selected
 
 
-def ppg_derived_hr_ibi(ppg_values: Sequence[int], duration_ms: int) -> tuple[list[float], list[float], dict[str, float | int]]:
+def ppg_derived_hr_ibi(ppg_values: Sequence[int | float], duration_ms: int) -> tuple[list[float], list[float], dict[str, float | int]]:
     if duration_ms <= 0 or len(ppg_values) < 3:
         return [], [], {"peak_count": 0, "valid_ibi_count": 0, "sample_rate_hz": 0.0}
     sample_rate_hz = len(ppg_values) / (duration_ms / 1000.0)
@@ -368,7 +450,14 @@ def quality_for_raw(values: Sequence[int | float], prefix: str) -> dict[str, flo
     return {key.removeprefix(f"{prefix}_"): value for key, value in features.items()}
 
 
-def epoch_row(session_id: int, epoch_index: int, packets: Sequence[PotchPacket], quality: QualityFilter) -> dict[str, Any]:
+def epoch_row(
+    session_id: int,
+    epoch_index: int,
+    packets: Sequence[PotchPacket],
+    quality: QualityFilter,
+    ppg_model_by_packet: dict[tuple[int, int], list[float]] | None = None,
+    ppg_scale: float = PPG_AC_SCALE,
+) -> dict[str, Any]:
     packets = sorted(packets, key=lambda packet: (packet.app_ts_ms, packet.seq))
     app_times = [packet.app_ts_ms for packet in packets]
     mcu_times = [packet.mcu_ts_ms for packet in packets]
@@ -404,7 +493,7 @@ def epoch_row(session_id: int, epoch_index: int, packets: Sequence[PotchPacket],
         row[f"{name}_min"] = stats["min"]
         row[f"{name}_max"] = stats["max"]
     ppg_raw_values = flatten_ppg(packets)
-    ppg_model_values = centered_ppg_proxy(ppg_raw_values)
+    ppg_model_values = flatten_ppg_proxy(packets, ppg_model_by_packet, ppg_scale)
     for suffix, value in stats_for_raw(ppg_model_values, "ppg").items():
         row[f"ppg_{suffix}"] = value
     for suffix, value in quality_for_raw(ppg_raw_values, "ppg").items():
@@ -421,7 +510,8 @@ def epoch_row(session_id: int, epoch_index: int, packets: Sequence[PotchPacket],
     for suffix, value in stats_for_raw(acc_vm_values, "acc_vm").items():
         row[f"acc_vm_{suffix}"] = value
     row["acc_vm_activity"] = activity(acc_vm_values)
-    hr_values, ibi_values, ppg_derived_report = ppg_derived_hr_ibi(ppg_raw_values, duration_ms)
+    ppg_peak_values: Sequence[int | float] = ppg_raw_values if ppg_model_by_packet is None else ppg_model_values
+    hr_values, ibi_values, ppg_derived_report = ppg_derived_hr_ibi(ppg_peak_values, duration_ms)
     for prefix, values in (("hr", hr_values), ("ibi", ibi_values)):
         for suffix, value in stats_for_raw(values, prefix).items():
             row[f"{prefix}_{suffix}"] = value
@@ -443,11 +533,23 @@ def build_epoch_rows(
     packets: Sequence[PotchPacket],
     session_gap_ms: int,
     quality: QualityFilter,
+    ppg_transform: str = "epoch-median",
+    ppg_scale: float = PPG_AC_SCALE,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for session_id, session in enumerate(split_sessions(packets, session_gap_ms)):
+        ppg_model_by_packet = session_ppg_proxy(session, ppg_transform, ppg_scale)
         for epoch_index, epoch_packets in sorted(group_epochs(session).items()):
-            rows.append(epoch_row(session_id, epoch_index, epoch_packets, quality))
+            rows.append(
+                epoch_row(
+                    session_id,
+                    epoch_index,
+                    epoch_packets,
+                    quality,
+                    ppg_model_by_packet=ppg_model_by_packet,
+                    ppg_scale=ppg_scale,
+                )
+            )
     return rows
 
 
@@ -520,9 +622,17 @@ def build_potch_epoch_features(
     clean_npz: Path | None = None,
     session_gap_ms: int = 30_000,
     quality: QualityFilter = QualityFilter(),
+    ppg_transform: str = "epoch-median",
+    ppg_scale: float = PPG_AC_SCALE,
 ) -> dict[str, Any]:
     packets, parse_report = parse_packets(raw_path)
-    rows = build_epoch_rows(packets, session_gap_ms=session_gap_ms, quality=quality)
+    rows = build_epoch_rows(
+        packets,
+        session_gap_ms=session_gap_ms,
+        quality=quality,
+        ppg_transform=ppg_transform,
+        ppg_scale=ppg_scale,
+    )
     clean_rows = [row for row in rows if row["quality_pass"]]
     write_csv(out_csv, rows)
     write_csv(clean_csv, clean_rows)
@@ -558,6 +668,8 @@ def build_potch_epoch_features(
         "clean_npz": str(clean_npz) if clean_npz is not None and clean_npz_written else None,
         "clean_npz_written": clean_npz_written,
         "session_gap_ms": session_gap_ms,
+        "ppg_transform": ppg_transform,
+        "ppg_scale": ppg_scale,
         "quality_filter": asdict(quality),
         "input_epoch_count": len(rows),
         "clean_epoch_count": len(clean_rows),
@@ -592,6 +704,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--summary-json", type=Path, required=True)
     parser.add_argument("--clean-npz", type=Path)
     parser.add_argument("--session-gap-ms", type=int, default=30_000)
+    parser.add_argument("--ppg-transform", choices=PPG_TRANSFORMS, default="epoch-median")
+    parser.add_argument("--ppg-scale", type=float, default=PPG_AC_SCALE)
     parser.add_argument("--packet-count-min", type=int, default=216)
     parser.add_argument("--duration-ms-min", type=int, default=25_000)
     parser.add_argument("--seq-gap-count-required", type=int, default=0)
@@ -613,6 +727,8 @@ def main() -> None:
         clean_npz=args.clean_npz,
         session_gap_ms=args.session_gap_ms,
         quality=quality,
+        ppg_transform=args.ppg_transform,
+        ppg_scale=args.ppg_scale,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2)[:12000])
 
