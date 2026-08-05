@@ -23,6 +23,9 @@ ACC_RAW_SCALE = 256.0
 PPG_AC_SCALE = 10.0
 IBI_MS_PER_SECOND = 1000.0
 DREAMT_SLOPE_SAMPLE_RATE_HZ = 100.0
+IBI_OUTLIER_REL_TOLERANCE = 0.20
+IBI_OUTLIER_MAD_MULTIPLIER = 4.0
+BEAT_MEDIAN_SMOOTH_WINDOW = 9
 PPG_TRANSFORMS = (
     "epoch-median",
     "rolling-mean-8s",
@@ -80,22 +83,34 @@ FEATURE_COLUMNS = (
     "acc_vm_slope",
     "acc_vm_activity",
     "hr_mean",
+    "hr_mean_v2",
     "hr_std",
+    "hr_std_v2",
     "hr_median",
+    "hr_median_v2",
     "hr_iqr",
+    "hr_iqr_v2",
     "hr_min",
+    "hr_min_v2",
     "hr_max",
+    "hr_max_v2",
     "hr_slope",
     "hr_slope_v2",
     "hr_missing_ratio",
     "hr_flatline_ratio",
     "hr_edge_ratio",
     "ibi_mean",
+    "ibi_mean_v2",
     "ibi_std",
+    "ibi_std_v2",
     "ibi_median",
+    "ibi_median_v2",
     "ibi_iqr",
+    "ibi_iqr_v2",
     "ibi_min",
+    "ibi_min_v2",
     "ibi_max",
+    "ibi_max_v2",
     "ibi_slope",
     "ibi_slope_v2",
     "ibi_missing_ratio",
@@ -438,9 +453,57 @@ def detect_ppg_peak_indices(ppg_values: Sequence[int | float], sample_rate_hz: f
     return selected
 
 
-def ppg_derived_hr_ibi(ppg_values: Sequence[int | float], duration_ms: int) -> tuple[list[float], list[float], dict[str, float | int]]:
+def median_filter(values: Sequence[float], window: int) -> list[float]:
+    if window <= 1 or len(values) < 3:
+        return [float(value) for value in values]
+    radius = window // 2
+    smoothed: list[float] = []
+    for index in range(len(values)):
+        start = max(0, index - radius)
+        end = min(len(values), index + radius + 1)
+        smoothed.append(float(statistics.median(values[start:end])))
+    return smoothed
+
+
+def reject_ibi_outliers(ibi_values: Sequence[float]) -> list[float]:
+    physiological = [float(value) for value in ibi_values if 0.3 <= float(value) <= 2.0]
+    if len(physiological) < 5:
+        return physiological
+
+    median = statistics.median(physiological)
+    abs_deviations = [abs(value - median) for value in physiological]
+    mad = statistics.median(abs_deviations)
+    robust_sigma = 1.4826 * mad
+    filtered: list[float] = []
+    for index, value in enumerate(physiological):
+        start = max(0, index - 2)
+        end = min(len(physiological), index + 3)
+        local_median = statistics.median(physiological[start:end])
+        rel_ok = local_median <= 0 or abs(value - local_median) / local_median <= IBI_OUTLIER_REL_TOLERANCE
+        mad_ok = robust_sigma <= 0 or abs(value - median) <= IBI_OUTLIER_MAD_MULTIPLIER * robust_sigma
+        if rel_ok and mad_ok:
+            filtered.append(value)
+    return filtered
+
+
+def smoothed_hr_ibi_v2(ibi_values: Sequence[float]) -> tuple[list[float], list[float]]:
+    filtered_ibi = reject_ibi_outliers(ibi_values)
+    smoothed_ibi = median_filter(filtered_ibi, BEAT_MEDIAN_SMOOTH_WINDOW)
+    smoothed_hr = [60.0 / ibi_seconds for ibi_seconds in smoothed_ibi if ibi_seconds > 0]
+    return smoothed_hr, smoothed_ibi
+
+
+def ppg_derived_hr_ibi(
+    ppg_values: Sequence[int | float],
+    duration_ms: int,
+) -> tuple[list[float], list[float], list[float], list[float], dict[str, float | int]]:
     if duration_ms <= 0 or len(ppg_values) < 3:
-        return [], [], {"peak_count": 0, "valid_ibi_count": 0, "sample_rate_hz": 0.0}
+        return [], [], [], [], {
+            "peak_count": 0,
+            "valid_ibi_count": 0,
+            "v2_valid_ibi_count": 0,
+            "sample_rate_hz": 0.0,
+        }
     sample_rate_hz = len(ppg_values) / (duration_ms / 1000.0)
     peaks = detect_ppg_peak_indices(ppg_values, sample_rate_hz)
     ibi_values: list[float] = []
@@ -449,12 +512,14 @@ def ppg_derived_hr_ibi(ppg_values: Sequence[int | float], duration_ms: int) -> t
         if 300.0 <= ibi_ms <= 2000.0:
             ibi_values.append(ibi_ms / IBI_MS_PER_SECOND)
     hr_values = [60.0 / ibi_seconds for ibi_seconds in ibi_values if ibi_seconds > 0]
+    hr_values_v2, ibi_values_v2 = smoothed_hr_ibi_v2(ibi_values)
     report = {
         "peak_count": len(peaks),
         "valid_ibi_count": len(ibi_values),
+        "v2_valid_ibi_count": len(ibi_values_v2),
         "sample_rate_hz": sample_rate_hz,
     }
-    return hr_values, ibi_values, report
+    return hr_values, ibi_values, hr_values_v2, ibi_values_v2, report
 
 
 def stats_for_raw(values: Iterable[int | float], prefix: str) -> dict[str, float | None]:
@@ -528,11 +593,20 @@ def epoch_row(
         row[f"acc_vm_{suffix}"] = value
     row["acc_vm_activity"] = activity(acc_vm_values)
     ppg_peak_values: Sequence[int | float] = ppg_raw_values if ppg_model_by_packet is None else ppg_model_values
-    hr_values, ibi_values, ppg_derived_report = ppg_derived_hr_ibi(ppg_peak_values, duration_ms)
-    for prefix, values in (("hr", hr_values), ("ibi", ibi_values)):
+    hr_values, ibi_values, hr_values_v2, ibi_values_v2, ppg_derived_report = ppg_derived_hr_ibi(
+        ppg_peak_values,
+        duration_ms,
+    )
+    for prefix, values, values_v2 in (
+        ("hr", hr_values, hr_values_v2),
+        ("ibi", ibi_values, ibi_values_v2),
+    ):
         for suffix, value in stats_for_raw(values, prefix).items():
             row[f"{prefix}_{suffix}"] = value
-        row[f"{prefix}_slope_v2"] = dreamt_grid_slope_v2(values, duration_ms)
+        for suffix, value in stats_for_raw(values_v2, prefix).items():
+            if suffix != "slope":
+                row[f"{prefix}_{suffix}_v2"] = value
+        row[f"{prefix}_slope_v2"] = dreamt_grid_slope_v2(values_v2, duration_ms)
         for suffix, value in quality_for_raw(values, prefix).items():
             row[f"{prefix}_{suffix}"] = value
     row["ppg_peak_count"] = ppg_derived_report["peak_count"]

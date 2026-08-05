@@ -68,6 +68,7 @@ FEATURE_PROFILES = (
     "v6-d-bvp-mean-imputed",
 )
 HR_IBI_SLOPE_SOURCES = ("current", "v2")
+HR_IBI_FEATURE_SOURCES = ("current", "v2")
 
 
 def find_existing(paths: Sequence[Path], label: str) -> Path:
@@ -163,11 +164,20 @@ def feature_disabled(feature: str, feature_profile: str) -> bool:
     raise ValueError(f"Unknown feature profile: {feature_profile}")
 
 
-def build_feature_map(hr_ibi_slope_source: str) -> dict[str, str]:
+def build_feature_map(
+    hr_ibi_slope_source: str,
+    hr_ibi_feature_source: str = "current",
+) -> dict[str, str]:
     if hr_ibi_slope_source not in HR_IBI_SLOPE_SOURCES:
         raise ValueError(f"Unknown HR/IBI slope source: {hr_ibi_slope_source}")
+    if hr_ibi_feature_source not in HR_IBI_FEATURE_SOURCES:
+        raise ValueError(f"Unknown HR/IBI feature source: {hr_ibi_feature_source}")
     feature_map = dict(BASE_FEATURE_MAP)
-    if hr_ibi_slope_source == "v2":
+    if hr_ibi_feature_source == "v2":
+        for signal in ("hr", "ibi"):
+            for suffix in ("mean", "std", "median", "iqr", "min", "max", "slope"):
+                feature_map[f"{signal}_{suffix}"] = f"{signal}_{suffix}_v2"
+    elif hr_ibi_slope_source == "v2":
         feature_map["hr_slope"] = "hr_slope_v2"
         feature_map["ibi_slope"] = "ibi_slope_v2"
     return feature_map
@@ -270,6 +280,7 @@ def build_context_windows(
     train_npz: Path,
     feature_profile: str,
     hr_ibi_slope_source: str,
+    hr_ibi_feature_source: str,
 ) -> tuple[np.ndarray, pd.DataFrame, dict[str, Any]]:
     df = sorted_clean_df(clean_csv)
     schema = load_train_schema(train_npz)
@@ -281,7 +292,7 @@ def build_context_windows(
     raw_values, feature_report = values_for_training_features(
         df,
         feature_names,
-        build_feature_map(hr_ibi_slope_source),
+        build_feature_map(hr_ibi_slope_source, hr_ibi_feature_source),
         feature_profile,
     )
     mean = schema["mean"].reshape(1, -1)
@@ -314,6 +325,7 @@ def build_context_windows(
         "input_epoch_count": int(len(df)),
         "window_count": int(len(windows)),
         "feature_profile": feature_profile,
+        "hr_ibi_feature_source": hr_ibi_feature_source,
         "hr_ibi_slope_source": hr_ibi_slope_source,
         **feature_report,
     }
@@ -520,6 +532,15 @@ def parse_args() -> argparse.Namespace:
             "to Potch hr_slope_v2/ibi_slope_v2, whose denominator matches DreamT 100Hz epochs."
         ),
     )
+    parser.add_argument(
+        "--hr-ibi-feature-source",
+        choices=HR_IBI_FEATURE_SOURCES,
+        default="current",
+        help=(
+            "current maps DreamT HR/IBI features to raw peak-derived features. "
+            "v2 maps HR/IBI mean/std/median/iqr/min/max/slope to cleaned and smoothed v2 features."
+        ),
+    )
     parser.add_argument("--session-gap-ms", type=int, default=30_000)
     parser.add_argument("--ppg-transform", choices=PPG_TRANSFORMS, default="epoch-median")
     parser.add_argument("--ppg-scale", type=float, default=PPG_AC_SCALE)
@@ -577,12 +598,14 @@ def main() -> None:
         original_npz,
         args.feature_profile,
         args.hr_ibi_slope_source,
+        args.hr_ibi_feature_source,
     )
     x_w20, meta_w20, w20_report = build_context_windows(
         clean_csv,
         w20_npz,
         args.feature_profile,
         args.hr_ibi_slope_source,
+        args.hr_ibi_feature_source,
     )
     if not meta_original[["session_id", "epoch_index"]].equals(meta_w20[["session_id", "epoch_index"]]):
         raise ValueError("Original and w20 context windows are not aligned")
@@ -709,6 +732,7 @@ def main() -> None:
         "output_root": str(output_root),
         "outer_seed": outer_seed,
         "feature_profile": args.feature_profile,
+        "hr_ibi_feature_source": args.hr_ibi_feature_source,
         "hr_ibi_slope_source": args.hr_ibi_slope_source,
         "ppg_transform": args.ppg_transform,
         "ppg_scale": args.ppg_scale,

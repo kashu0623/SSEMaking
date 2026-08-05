@@ -17,6 +17,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from scripts.potch.run_current_best_outer42_inference_colab import (
     FEATURE_PROFILES,
+    HR_IBI_FEATURE_SOURCES,
     HR_IBI_SLOPE_SOURCES,
     build_feature_map,
     find_existing,
@@ -102,6 +103,7 @@ def audit_schema(
     train_npz: Path,
     feature_profile: str,
     hr_ibi_slope_source: str,
+    hr_ibi_feature_source: str = "current",
 ) -> dict[str, Any]:
     df = sorted_clean_df(clean_csv)
     schema = load_train_schema(train_npz)
@@ -110,7 +112,7 @@ def audit_schema(
     raw_values, feature_report = values_for_training_features(
         df,
         feature_names,
-        build_feature_map(hr_ibi_slope_source),
+        build_feature_map(hr_ibi_slope_source, hr_ibi_feature_source),
         feature_profile,
     )
 
@@ -198,6 +200,7 @@ def audit_schema(
             "input_epoch_count": int(len(df)),
             "window_count": int(raw_windows.shape[0]),
             "feature_profile": feature_profile,
+            "hr_ibi_feature_source": hr_ibi_feature_source,
             "hr_ibi_slope_source": hr_ibi_slope_source,
             **feature_report,
         },
@@ -225,6 +228,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--w20-npz", type=Path)
     parser.add_argument("--feature-profile", choices=FEATURE_PROFILES, default="current")
     parser.add_argument("--hr-ibi-slope-source", choices=HR_IBI_SLOPE_SOURCES, default="current")
+    parser.add_argument("--hr-ibi-feature-source", choices=HR_IBI_FEATURE_SOURCES, default="current")
     parser.add_argument("--session-gap-ms", type=int, default=30_000)
     parser.add_argument("--ppg-transform", choices=PPG_TRANSFORMS, default="epoch-median")
     parser.add_argument("--ppg-scale", type=float, default=PPG_AC_SCALE)
@@ -279,6 +283,7 @@ def main() -> None:
         "clean_csv": str(clean_csv),
         "raw_input": str(raw_path) if raw_path is not None else None,
         "feature_profile": args.feature_profile,
+        "hr_ibi_feature_source": args.hr_ibi_feature_source,
         "hr_ibi_slope_source": args.hr_ibi_slope_source,
         "ppg_transform": args.ppg_transform,
         "ppg_scale": args.ppg_scale,
@@ -288,12 +293,14 @@ def main() -> None:
             original_npz,
             args.feature_profile,
             args.hr_ibi_slope_source,
+            args.hr_ibi_feature_source,
         ),
         "w20": audit_schema(
             clean_csv,
             w20_npz,
             args.feature_profile,
             args.hr_ibi_slope_source,
+            args.hr_ibi_feature_source,
         ),
     }
     out_json = args.out_dir / "potch_feature_calibration_audit.json"
