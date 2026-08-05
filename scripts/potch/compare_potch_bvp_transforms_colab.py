@@ -15,6 +15,7 @@ if str(REPO_ROOT) not in sys.path:
 from scripts.potch.audit_potch_feature_calibration_colab import audit_schema
 from scripts.potch.run_current_best_outer42_inference_colab import (
     FEATURE_PROFILES,
+    HR_IBI_SLOPE_SOURCES,
     find_existing,
 )
 from sse_sleep.potch_raw import PPG_AC_SCALE, PPG_TRANSFORMS, QualityFilter, build_potch_epoch_features
@@ -94,6 +95,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--original-npz", type=Path)
     parser.add_argument("--w20-npz", type=Path)
     parser.add_argument("--feature-profile", choices=FEATURE_PROFILES, default="current")
+    parser.add_argument("--hr-ibi-slope-source", choices=HR_IBI_SLOPE_SOURCES, default="current")
     parser.add_argument("--ppg-transforms", choices=PPG_TRANSFORMS, nargs="+", default=list(PPG_TRANSFORMS))
     parser.add_argument("--ppg-scale", type=float, default=PPG_AC_SCALE)
     parser.add_argument("--session-gap-ms", type=int, default=30_000)
@@ -146,8 +148,18 @@ def main() -> None:
             ppg_transform=transform,
             ppg_scale=args.ppg_scale,
         )
-        original = audit_schema(clean_csv, original_npz, args.feature_profile)
-        w20 = audit_schema(clean_csv, w20_npz, args.feature_profile)
+        original = audit_schema(
+            clean_csv,
+            original_npz,
+            args.feature_profile,
+            args.hr_ibi_slope_source,
+        )
+        w20 = audit_schema(
+            clean_csv,
+            w20_npz,
+            args.feature_profile,
+            args.hr_ibi_slope_source,
+        )
         candidates[transform] = {
             "clean_csv": str(clean_csv),
             "raw_feature_report": raw_report,
@@ -161,6 +173,7 @@ def main() -> None:
         "raw_input": str(raw_path),
         "output_root": str(args.output_root),
         "feature_profile": args.feature_profile,
+        "hr_ibi_slope_source": args.hr_ibi_slope_source,
         "ppg_scale": args.ppg_scale,
         "transforms": list(args.ppg_transforms),
         "candidates": candidates,
@@ -170,6 +183,7 @@ def main() -> None:
     compact = {
         "out_json": str(out_json),
         "feature_profile": args.feature_profile,
+        "hr_ibi_slope_source": args.hr_ibi_slope_source,
         "ppg_scale": args.ppg_scale,
         "candidate_scores": {
             transform: {

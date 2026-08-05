@@ -16,8 +16,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.potch.run_current_best_outer42_inference_colab import (
-    BASE_FEATURE_MAP,
     FEATURE_PROFILES,
+    HR_IBI_SLOPE_SOURCES,
+    build_feature_map,
     find_existing,
     load_train_schema,
     sorted_clean_df,
@@ -96,7 +97,12 @@ def summarize_feature(
     }
 
 
-def audit_schema(clean_csv: Path, train_npz: Path, feature_profile: str) -> dict[str, Any]:
+def audit_schema(
+    clean_csv: Path,
+    train_npz: Path,
+    feature_profile: str,
+    hr_ibi_slope_source: str,
+) -> dict[str, Any]:
     df = sorted_clean_df(clean_csv)
     schema = load_train_schema(train_npz)
     feature_names = schema["feature_names"].astype(str)
@@ -104,7 +110,7 @@ def audit_schema(clean_csv: Path, train_npz: Path, feature_profile: str) -> dict
     raw_values, feature_report = values_for_training_features(
         df,
         feature_names,
-        BASE_FEATURE_MAP,
+        build_feature_map(hr_ibi_slope_source),
         feature_profile,
     )
 
@@ -192,6 +198,7 @@ def audit_schema(clean_csv: Path, train_npz: Path, feature_profile: str) -> dict
             "input_epoch_count": int(len(df)),
             "window_count": int(raw_windows.shape[0]),
             "feature_profile": feature_profile,
+            "hr_ibi_slope_source": hr_ibi_slope_source,
             **feature_report,
         },
         "meta": {
@@ -217,6 +224,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--original-npz", type=Path)
     parser.add_argument("--w20-npz", type=Path)
     parser.add_argument("--feature-profile", choices=FEATURE_PROFILES, default="current")
+    parser.add_argument("--hr-ibi-slope-source", choices=HR_IBI_SLOPE_SOURCES, default="current")
     parser.add_argument("--session-gap-ms", type=int, default=30_000)
     parser.add_argument("--ppg-transform", choices=PPG_TRANSFORMS, default="epoch-median")
     parser.add_argument("--ppg-scale", type=float, default=PPG_AC_SCALE)
@@ -271,11 +279,22 @@ def main() -> None:
         "clean_csv": str(clean_csv),
         "raw_input": str(raw_path) if raw_path is not None else None,
         "feature_profile": args.feature_profile,
+        "hr_ibi_slope_source": args.hr_ibi_slope_source,
         "ppg_transform": args.ppg_transform,
         "ppg_scale": args.ppg_scale,
         "raw_feature_report": raw_report,
-        "original": audit_schema(clean_csv, original_npz, args.feature_profile),
-        "w20": audit_schema(clean_csv, w20_npz, args.feature_profile),
+        "original": audit_schema(
+            clean_csv,
+            original_npz,
+            args.feature_profile,
+            args.hr_ibi_slope_source,
+        ),
+        "w20": audit_schema(
+            clean_csv,
+            w20_npz,
+            args.feature_profile,
+            args.hr_ibi_slope_source,
+        ),
     }
     out_json = args.out_dir / "potch_feature_calibration_audit.json"
     out_json.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

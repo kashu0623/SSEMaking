@@ -22,6 +22,7 @@ EPOCH_MS = 30_000
 ACC_RAW_SCALE = 256.0
 PPG_AC_SCALE = 10.0
 IBI_MS_PER_SECOND = 1000.0
+DREAMT_SLOPE_SAMPLE_RATE_HZ = 100.0
 PPG_TRANSFORMS = (
     "epoch-median",
     "rolling-mean-8s",
@@ -85,6 +86,7 @@ FEATURE_COLUMNS = (
     "hr_min",
     "hr_max",
     "hr_slope",
+    "hr_slope_v2",
     "hr_missing_ratio",
     "hr_flatline_ratio",
     "hr_edge_ratio",
@@ -95,6 +97,7 @@ FEATURE_COLUMNS = (
     "ibi_min",
     "ibi_max",
     "ibi_slope",
+    "ibi_slope_v2",
     "ibi_missing_ratio",
     "ibi_flatline_ratio",
     "ibi_edge_ratio",
@@ -358,6 +361,20 @@ def activity(values: Sequence[float]) -> float | None:
     return movement / (len(values) - 1)
 
 
+def dreamt_grid_slope_v2(
+    values: Sequence[float],
+    duration_ms: int,
+    sample_rate_hz: float = DREAMT_SLOPE_SAMPLE_RATE_HZ,
+) -> float | None:
+    if len(values) < 2 or duration_ms <= 0:
+        return None
+    edge_count = max(1, min(3, len(values) // 5))
+    start_value = statistics.median(values[:edge_count])
+    end_value = statistics.median(values[-edge_count:])
+    dreamt_samples = max(2, int(round((duration_ms / 1000.0) * sample_rate_hz)))
+    return (float(end_value) - float(start_value)) / (dreamt_samples - 1)
+
+
 def moving_average(values: Sequence[float], window: int) -> list[float]:
     if window <= 1 or not values:
         return [float(value) for value in values]
@@ -515,6 +532,7 @@ def epoch_row(
     for prefix, values in (("hr", hr_values), ("ibi", ibi_values)):
         for suffix, value in stats_for_raw(values, prefix).items():
             row[f"{prefix}_{suffix}"] = value
+        row[f"{prefix}_slope_v2"] = dreamt_grid_slope_v2(values, duration_ms)
         for suffix, value in quality_for_raw(values, prefix).items():
             row[f"{prefix}_{suffix}"] = value
     row["ppg_peak_count"] = ppg_derived_report["peak_count"]
