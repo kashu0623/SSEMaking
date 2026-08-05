@@ -13,7 +13,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-from .features import basic_stats, quality_features
+from .features import basic_stats, quality_features, temp_epoch_features
 
 
 RECORD_BYTES = 150
@@ -26,6 +26,11 @@ DREAMT_SLOPE_SAMPLE_RATE_HZ = 100.0
 IBI_OUTLIER_REL_TOLERANCE = 0.20
 IBI_OUTLIER_MAD_MULTIPLIER = 4.0
 BEAT_MEDIAN_SMOOTH_WINDOW = 9
+NTC_R0_OHMS = 100_000.0
+NTC_BETA_K = 4390.0
+NTC_T0_K = 298.15
+NTC_FIXED_RESISTOR_OHMS = 100_000.0
+NTC_ADC_MAX = 4095.0
 PPG_TRANSFORMS = (
     "epoch-median",
     "rolling-mean-8s",
@@ -43,6 +48,14 @@ FEATURE_COLUMNS = (
     "ntc_raw_mean",
     "ntc_raw_min",
     "ntc_raw_max",
+    "temp_mean",
+    "temp_std",
+    "temp_median",
+    "temp_iqr",
+    "temp_min",
+    "temp_max",
+    "temp_slope",
+    "temp_baseline_delta",
     "ppg_mean",
     "ppg_std",
     "ppg_median",
@@ -293,6 +306,19 @@ def flattened_imu_axis(packets: Sequence[PotchPacket], axis_index: int) -> list[
 
 def flattened_acc_axis(packets: Sequence[PotchPacket], axis_index: int) -> list[float]:
     return [sample[axis_index] / ACC_RAW_SCALE for packet in packets for sample in packet.imu]
+
+
+def ntc_raw_to_celsius(raw: int | float) -> float | None:
+    adc = float(raw)
+    if not math.isfinite(adc) or adc <= 0 or adc >= NTC_ADC_MAX:
+        return None
+    resistance = NTC_FIXED_RESISTOR_OHMS * adc / (NTC_ADC_MAX - adc)
+    if resistance <= 0:
+        return None
+    inv_temp_k = (1.0 / NTC_T0_K) + (1.0 / NTC_BETA_K) * math.log(resistance / NTC_R0_OHMS)
+    if inv_temp_k <= 0:
+        return None
+    return (1.0 / inv_temp_k) - 273.15
 
 
 def flatten_ppg(packets: Sequence[PotchPacket]) -> list[int]:
@@ -559,6 +585,7 @@ def epoch_row(
     quality: QualityFilter,
     ppg_model_by_packet: dict[tuple[int, int], list[float]] | None = None,
     ppg_scale: float = PPG_AC_SCALE,
+    temp_session_baseline: float | None = None,
 ) -> dict[str, Any]:
     packets = sorted(packets, key=lambda packet: (packet.app_ts_ms, packet.seq))
     app_times = [packet.app_ts_ms for packet in packets]
@@ -594,6 +621,12 @@ def epoch_row(
         row[f"{name}_mean"] = stats["mean"]
         row[f"{name}_min"] = stats["min"]
         row[f"{name}_max"] = stats["max"]
+    temp_values = [
+        converted
+        for packet in packets
+        if (converted := ntc_raw_to_celsius(packet.ntc_raw)) is not None
+    ]
+    row.update(temp_epoch_features(temp_values, temp_session_baseline))
     ppg_raw_values = flatten_ppg(packets)
     ppg_model_values = flatten_ppg_proxy(packets, ppg_model_by_packet, ppg_scale)
     for suffix, value in stats_for_raw(ppg_model_values, "ppg").items():
@@ -651,6 +684,16 @@ def build_epoch_rows(
     rows: list[dict[str, Any]] = []
     for session_id, session in enumerate(split_sessions(packets, session_gap_ms)):
         ppg_model_by_packet = session_ppg_proxy(session, ppg_transform, ppg_scale)
+        session_temp_values = [
+            converted
+            for packet in session
+            if (converted := ntc_raw_to_celsius(packet.ntc_raw)) is not None
+        ]
+        temp_session_baseline = (
+            float(statistics.median(session_temp_values))
+            if session_temp_values
+            else None
+        )
         for epoch_index, epoch_packets in sorted(group_epochs(session).items()):
             rows.append(
                 epoch_row(
@@ -660,6 +703,7 @@ def build_epoch_rows(
                     quality,
                     ppg_model_by_packet=ppg_model_by_packet,
                     ppg_scale=ppg_scale,
+                    temp_session_baseline=temp_session_baseline,
                 )
             )
     return rows

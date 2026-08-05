@@ -69,6 +69,7 @@ FEATURE_PROFILES = (
 )
 HR_IBI_SLOPE_SOURCES = ("current", "v2")
 HR_IBI_FEATURE_SOURCES = ("current", "v2")
+TEMP_FEATURE_SOURCES = ("none", "ntc-beta")
 
 
 def find_existing(paths: Sequence[Path], label: str) -> Path:
@@ -167,11 +168,14 @@ def feature_disabled(feature: str, feature_profile: str) -> bool:
 def build_feature_map(
     hr_ibi_slope_source: str,
     hr_ibi_feature_source: str = "current",
+    temp_feature_source: str = "none",
 ) -> dict[str, str]:
     if hr_ibi_slope_source not in HR_IBI_SLOPE_SOURCES:
         raise ValueError(f"Unknown HR/IBI slope source: {hr_ibi_slope_source}")
     if hr_ibi_feature_source not in HR_IBI_FEATURE_SOURCES:
         raise ValueError(f"Unknown HR/IBI feature source: {hr_ibi_feature_source}")
+    if temp_feature_source not in TEMP_FEATURE_SOURCES:
+        raise ValueError(f"Unknown temp feature source: {temp_feature_source}")
     feature_map = dict(BASE_FEATURE_MAP)
     if hr_ibi_feature_source == "v2":
         for signal in ("hr", "ibi"):
@@ -180,6 +184,9 @@ def build_feature_map(
     elif hr_ibi_slope_source == "v2":
         feature_map["hr_slope"] = "hr_slope_v2"
         feature_map["ibi_slope"] = "ibi_slope_v2"
+    if temp_feature_source == "ntc-beta":
+        for suffix in ("mean", "std", "median", "iqr", "min", "max", "slope", "baseline_delta"):
+            feature_map[f"temp_{suffix}"] = f"temp_{suffix}"
     return feature_map
 
 
@@ -281,6 +288,7 @@ def build_context_windows(
     feature_profile: str,
     hr_ibi_slope_source: str,
     hr_ibi_feature_source: str,
+    temp_feature_source: str,
 ) -> tuple[np.ndarray, pd.DataFrame, dict[str, Any]]:
     df = sorted_clean_df(clean_csv)
     schema = load_train_schema(train_npz)
@@ -292,7 +300,7 @@ def build_context_windows(
     raw_values, feature_report = values_for_training_features(
         df,
         feature_names,
-        build_feature_map(hr_ibi_slope_source, hr_ibi_feature_source),
+        build_feature_map(hr_ibi_slope_source, hr_ibi_feature_source, temp_feature_source),
         feature_profile,
     )
     mean = schema["mean"].reshape(1, -1)
@@ -327,6 +335,7 @@ def build_context_windows(
         "feature_profile": feature_profile,
         "hr_ibi_feature_source": hr_ibi_feature_source,
         "hr_ibi_slope_source": hr_ibi_slope_source,
+        "temp_feature_source": temp_feature_source,
         **feature_report,
     }
     return np.stack(windows).astype(np.float32), meta, report
@@ -541,6 +550,12 @@ def parse_args() -> argparse.Namespace:
             "v2 maps HR/IBI mean/std/median/iqr/min/max/slope to cleaned and smoothed v2 features."
         ),
     )
+    parser.add_argument(
+        "--temp-feature-source",
+        choices=TEMP_FEATURE_SOURCES,
+        default="none",
+        help="none imputes DreamT temp features. ntc-beta maps Potch NTC raw through the 104JT-025 beta equation.",
+    )
     parser.add_argument("--session-gap-ms", type=int, default=30_000)
     parser.add_argument("--ppg-transform", choices=PPG_TRANSFORMS, default="epoch-median")
     parser.add_argument("--ppg-scale", type=float, default=PPG_AC_SCALE)
@@ -599,6 +614,7 @@ def main() -> None:
         args.feature_profile,
         args.hr_ibi_slope_source,
         args.hr_ibi_feature_source,
+        args.temp_feature_source,
     )
     x_w20, meta_w20, w20_report = build_context_windows(
         clean_csv,
@@ -606,6 +622,7 @@ def main() -> None:
         args.feature_profile,
         args.hr_ibi_slope_source,
         args.hr_ibi_feature_source,
+        args.temp_feature_source,
     )
     if not meta_original[["session_id", "epoch_index"]].equals(meta_w20[["session_id", "epoch_index"]]):
         raise ValueError("Original and w20 context windows are not aligned")
@@ -734,6 +751,7 @@ def main() -> None:
         "feature_profile": args.feature_profile,
         "hr_ibi_feature_source": args.hr_ibi_feature_source,
         "hr_ibi_slope_source": args.hr_ibi_slope_source,
+        "temp_feature_source": args.temp_feature_source,
         "ppg_transform": args.ppg_transform,
         "ppg_scale": args.ppg_scale,
         "device": str(device),
