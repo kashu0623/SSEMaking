@@ -66,6 +66,7 @@ FEATURE_PROFILES = (
     "v6-b-hribi-rollmean-kept",
     "v6-c-hribi-no-slope",
     "v6-d-bvp-mean-imputed",
+    "v7-b-hr-variability-imputed",
 )
 HR_IBI_SLOPE_SOURCES = ("current", "v2")
 HR_IBI_FEATURE_SOURCES = ("current", "v2")
@@ -150,6 +151,11 @@ def v6_d_bvp_mean_imputed_disabled(feature: str) -> bool:
     return base == "bvp_mean"
 
 
+def v7_b_hr_variability_imputed_disabled(feature: str) -> bool:
+    base, _, _ = split_temporal_feature(feature)
+    return base in {"hr_std", "hr_iqr", "hr_slope"}
+
+
 def feature_disabled(feature: str, feature_profile: str) -> bool:
     if feature_profile == "current":
         return False
@@ -163,6 +169,8 @@ def feature_disabled(feature: str, feature_profile: str) -> bool:
         return v6_c_hribi_no_slope_disabled(feature)
     if feature_profile == "v6-d-bvp-mean-imputed":
         return v6_d_bvp_mean_imputed_disabled(feature)
+    if feature_profile == "v7-b-hr-variability-imputed":
+        return v7_b_hr_variability_imputed_disabled(feature)
     raise ValueError(f"Unknown feature profile: {feature_profile}")
 
 
