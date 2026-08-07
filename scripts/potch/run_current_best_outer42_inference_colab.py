@@ -68,6 +68,7 @@ FEATURE_PROFILES = (
     "v6-d-bvp-mean-imputed",
     "v7-b1-hr-std-iqr-imputed",
     "v7-b2-hr-std-iqr-zclip5",
+    "v7-b3a-hr-std-iqr-scale",
     "v7-b-hr-variability-imputed",
 )
 HR_IBI_SLOPE_SOURCES = ("current", "v2")
@@ -171,6 +172,15 @@ def feature_clip_z(feature: str, feature_profile: str) -> float | None:
     return None
 
 
+def feature_scale_factor(feature: str, feature_profile: str) -> float | None:
+    if feature_profile == "v7-b3a-hr-std-iqr-scale":
+        if feature == "hr_std":
+            return 0.14
+        if feature == "hr_iqr":
+            return 0.12
+    return None
+
+
 def feature_disabled(feature: str, feature_profile: str) -> bool:
     if feature_profile == "current":
         return False
@@ -187,6 +197,8 @@ def feature_disabled(feature: str, feature_profile: str) -> bool:
     if feature_profile == "v7-b1-hr-std-iqr-imputed":
         return v7_b1_hr_std_iqr_imputed_disabled(feature)
     if feature_profile == "v7-b2-hr-std-iqr-zclip5":
+        return False
+    if feature_profile == "v7-b3a-hr-std-iqr-scale":
         return False
     if feature_profile == "v7-b-hr-variability-imputed":
         return v7_b_hr_variability_imputed_disabled(feature)
@@ -247,6 +259,8 @@ def values_for_training_features(
     profile_imputed_features: set[str] = set()
     profile_clipped_features: set[str] = set()
     profile_clipped_value_count = 0
+    profile_scaled_features: set[str] = set()
+    profile_scaled_value_count = 0
     train_stats = {
         str(name): (float(train_mean[index]), float(train_std[index]))
         for index, name in enumerate(feature_names)
@@ -267,11 +281,22 @@ def values_for_training_features(
             profile_clipped_value_count += 1
         return clipped
 
+    def maybe_scale_base(feature: str, value: float) -> float:
+        nonlocal profile_scaled_value_count
+        scale = feature_scale_factor(feature, feature_profile)
+        if scale is None or value != value:
+            return value
+        scaled = float(value * scale)
+        profile_scaled_features.add(feature)
+        if scaled != value:
+            profile_scaled_value_count += 1
+        return scaled
+
     for _, group in df.groupby("session_id", sort=True):
         history: list[dict[str, float]] = []
         for _, row in group.sort_values("epoch_index").iterrows():
             current_base = {
-                name: maybe_clip(name, base_value(row, name, feature_map))
+                name: maybe_clip(name, maybe_scale_base(name, base_value(row, name, feature_map)))
                 for name in feature_map
             }
             out_row: list[float] = []
@@ -282,7 +307,13 @@ def values_for_training_features(
                     out_row.append(float("nan"))
                     continue
 
-                direct = current_base.get(feature, base_value(row, feature, feature_map))
+                if feature in current_base:
+                    direct = current_base[feature]
+                    if direct == direct:
+                        out_row.append(direct)
+                        continue
+
+                direct = base_value(row, feature, feature_map)
                 if direct == direct:
                     out_row.append(maybe_clip(feature, direct))
                     continue
@@ -331,6 +362,9 @@ def values_for_training_features(
         "profile_clipped_feature_count": len(profile_clipped_features),
         "profile_clipped_features": sorted(profile_clipped_features),
         "profile_clipped_value_count": profile_clipped_value_count,
+        "profile_scaled_feature_count": len(profile_scaled_features),
+        "profile_scaled_features": sorted(profile_scaled_features),
+        "profile_scaled_value_count": profile_scaled_value_count,
     }
     return np.asarray(values, dtype=np.float32), report
 
