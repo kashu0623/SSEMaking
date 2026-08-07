@@ -74,6 +74,7 @@ FEATURE_PROFILES = (
     "v7-b3c-hr-std-iqr-scale",
     "v7-b3d-hr-std-iqr-scale",
     "main-serving-b3a-slope-a",
+    "main-serving-b3a-slope-b",
     "v7-b-hr-variability-imputed",
 )
 HR_IBI_SLOPE_SOURCES = ("current", "v2")
@@ -178,7 +179,12 @@ def feature_clip_z(feature: str, feature_profile: str) -> float | None:
 
 
 def feature_scale_factor(feature: str, feature_profile: str) -> float | None:
-    if feature_profile in {"main-serving-b3a", "v7-b3a-hr-std-iqr-scale", "main-serving-b3a-slope-a"}:
+    if feature_profile in {
+        "main-serving-b3a",
+        "v7-b3a-hr-std-iqr-scale",
+        "main-serving-b3a-slope-a",
+        "main-serving-b3a-slope-b",
+    }:
         if feature == "hr_std":
             return 0.14
         if feature == "hr_iqr":
@@ -190,6 +196,13 @@ def feature_scale_factor(feature: str, feature_profile: str) -> float | None:
             return 0.50
         if feature == "temp_slope":
             return 0.35
+    if feature_profile == "main-serving-b3a-slope-b":
+        if feature == "hr_slope":
+            return 0.50
+        if feature == "ibi_slope":
+            return 0.75
+        if feature == "temp_slope":
+            return 0.60
     if feature_profile == "v7-b3b-hr-std-iqr-scale":
         if feature == "hr_std":
             return 0.20
@@ -236,6 +249,8 @@ def feature_disabled(feature: str, feature_profile: str) -> bool:
     if feature_profile == "v7-b3d-hr-std-iqr-scale":
         return False
     if feature_profile == "main-serving-b3a-slope-a":
+        return False
+    if feature_profile == "main-serving-b3a-slope-b":
         return False
     if feature_profile == "v7-b-hr-variability-imputed":
         return v7_b_hr_variability_imputed_disabled(feature)
