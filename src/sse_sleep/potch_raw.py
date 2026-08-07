@@ -40,6 +40,9 @@ PPG_TRANSFORMS = (
     "bvp-like-8s",
     "bvp-like-15s",
     "bvp-like-30s",
+    "bvp-like-x2-8s",
+    "bvp-like-x2-15s",
+    "bvp-like-x2-30s",
 )
 
 
@@ -408,6 +411,12 @@ def seconds_from_transform(transform: str, default: float) -> float:
     return default
 
 
+def bvp_like_gain_from_transform(transform: str) -> float:
+    if transform.startswith("bvp-like-x2"):
+        return 2.0
+    return 1.0
+
+
 def robust_spread(values: Sequence[float]) -> float:
     finite = [float(value) for value in values if math.isfinite(float(value))]
     if len(finite) < 2:
@@ -427,6 +436,7 @@ def bvp_like_ppg_transform(
     raw_values: Sequence[float],
     sample_rate_hz: float,
     baseline_seconds: float,
+    gain: float = 1.0,
 ) -> list[float]:
     if not raw_values:
         return []
@@ -441,7 +451,7 @@ def bvp_like_ppg_transform(
     median = statistics.median(smoothed)
     centered = [float(value - median) for value in smoothed]
     scale = robust_spread(centered)
-    scaled = [value / scale for value in centered]
+    scaled = [(value / scale) * gain for value in centered]
     return [min(8.0, max(-8.0, value)) for value in scaled]
 
 
@@ -464,7 +474,8 @@ def session_ppg_proxy(
     else:
         baseline_seconds = seconds_from_transform(transform, 15.0)
         if transform.startswith("bvp-like"):
-            transformed = bvp_like_ppg_transform(raw_values, sample_rate_hz, baseline_seconds)
+            gain = bvp_like_gain_from_transform(transform)
+            transformed = bvp_like_ppg_transform(raw_values, sample_rate_hz, baseline_seconds, gain)
         else:
             baseline_window = max(3, int(round(sample_rate_hz * baseline_seconds)))
             baseline = moving_average(raw_values, baseline_window)
