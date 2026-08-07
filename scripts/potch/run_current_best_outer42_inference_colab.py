@@ -61,6 +61,7 @@ TEMPORAL_DELTA_RE = re.compile(r"^(?P<base>.+)_delta_(?P<lag>[0-9]+)$")
 TEMPORAL_ROLL_RE = re.compile(r"^(?P<base>.+)_roll_(?P<stat>mean|std)_(?P<window>[0-9]+)$")
 FEATURE_PROFILES = (
     "current",
+    "main-serving-b3a",
     "stable-vitals-v5",
     "v6-a-bvp-mean-kept",
     "v6-b-hribi-rollmean-kept",
@@ -70,6 +71,8 @@ FEATURE_PROFILES = (
     "v7-b2-hr-std-iqr-zclip5",
     "v7-b3a-hr-std-iqr-scale",
     "v7-b3b-hr-std-iqr-scale",
+    "v7-b3c-hr-std-iqr-scale",
+    "v7-b3d-hr-std-iqr-scale",
     "v7-b-hr-variability-imputed",
 )
 HR_IBI_SLOPE_SOURCES = ("current", "v2")
@@ -174,7 +177,7 @@ def feature_clip_z(feature: str, feature_profile: str) -> float | None:
 
 
 def feature_scale_factor(feature: str, feature_profile: str) -> float | None:
-    if feature_profile == "v7-b3a-hr-std-iqr-scale":
+    if feature_profile in {"main-serving-b3a", "v7-b3a-hr-std-iqr-scale"}:
         if feature == "hr_std":
             return 0.14
         if feature == "hr_iqr":
@@ -184,11 +187,23 @@ def feature_scale_factor(feature: str, feature_profile: str) -> float | None:
             return 0.20
         if feature == "hr_iqr":
             return 0.18
+    if feature_profile == "v7-b3c-hr-std-iqr-scale":
+        if feature == "hr_std":
+            return 0.16
+        if feature == "hr_iqr":
+            return 0.14
+    if feature_profile == "v7-b3d-hr-std-iqr-scale":
+        if feature == "hr_std":
+            return 0.12
+        if feature == "hr_iqr":
+            return 0.10
     return None
 
 
 def feature_disabled(feature: str, feature_profile: str) -> bool:
     if feature_profile == "current":
+        return False
+    if feature_profile == "main-serving-b3a":
         return False
     if feature_profile == "stable-vitals-v5":
         return stable_vitals_v5_disabled(feature)
@@ -207,6 +222,10 @@ def feature_disabled(feature: str, feature_profile: str) -> bool:
     if feature_profile == "v7-b3a-hr-std-iqr-scale":
         return False
     if feature_profile == "v7-b3b-hr-std-iqr-scale":
+        return False
+    if feature_profile == "v7-b3c-hr-std-iqr-scale":
+        return False
+    if feature_profile == "v7-b3d-hr-std-iqr-scale":
         return False
     if feature_profile == "v7-b-hr-variability-imputed":
         return v7_b_hr_variability_imputed_disabled(feature)
