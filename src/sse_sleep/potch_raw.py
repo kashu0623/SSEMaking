@@ -43,6 +43,9 @@ PPG_TRANSFORMS = (
     "bvp-like-x2-8s",
     "bvp-like-x2-15s",
     "bvp-like-x2-30s",
+    "bvp-like-x3-8s",
+    "bvp-like-x3-15s",
+    "bvp-like-x3-30s",
 )
 
 
@@ -412,6 +415,8 @@ def seconds_from_transform(transform: str, default: float) -> float:
 
 
 def bvp_like_gain_from_transform(transform: str) -> float:
+    if transform.startswith("bvp-like-x3"):
+        return 3.0
     if transform.startswith("bvp-like-x2"):
         return 2.0
     return 1.0
