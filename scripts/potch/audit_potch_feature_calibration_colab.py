@@ -123,6 +123,8 @@ def audit_schema(
             temp_slope_source,
         ),
         feature_profile,
+        schema["mean"],
+        schema["std"],
     )
 
     windows: list[np.ndarray] = []

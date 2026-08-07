@@ -67,6 +67,7 @@ FEATURE_PROFILES = (
     "v6-c-hribi-no-slope",
     "v6-d-bvp-mean-imputed",
     "v7-b1-hr-std-iqr-imputed",
+    "v7-b2-hr-std-iqr-zclip5",
     "v7-b-hr-variability-imputed",
 )
 HR_IBI_SLOPE_SOURCES = ("current", "v2")
@@ -162,6 +163,14 @@ def v7_b1_hr_std_iqr_imputed_disabled(feature: str) -> bool:
     return base in {"hr_std", "hr_iqr"}
 
 
+def feature_clip_z(feature: str, feature_profile: str) -> float | None:
+    if feature_profile == "v7-b2-hr-std-iqr-zclip5":
+        base, _, _ = split_temporal_feature(feature)
+        if base in {"hr_std", "hr_iqr"}:
+            return 5.0
+    return None
+
+
 def feature_disabled(feature: str, feature_profile: str) -> bool:
     if feature_profile == "current":
         return False
@@ -177,6 +186,8 @@ def feature_disabled(feature: str, feature_profile: str) -> bool:
         return v6_d_bvp_mean_imputed_disabled(feature)
     if feature_profile == "v7-b1-hr-std-iqr-imputed":
         return v7_b1_hr_std_iqr_imputed_disabled(feature)
+    if feature_profile == "v7-b2-hr-std-iqr-zclip5":
+        return False
     if feature_profile == "v7-b-hr-variability-imputed":
         return v7_b_hr_variability_imputed_disabled(feature)
     raise ValueError(f"Unknown feature profile: {feature_profile}")
@@ -227,16 +238,42 @@ def values_for_training_features(
     feature_names: Sequence[str],
     feature_map: dict[str, str],
     feature_profile: str,
+    train_mean: Sequence[float] | None = None,
+    train_std: Sequence[float] | None = None,
 ) -> tuple[np.ndarray, dict[str, Any]]:
     values: list[list[float]] = []
     missing_base_features: set[str] = set()
     missing_full_features: set[str] = set()
     profile_imputed_features: set[str] = set()
+    profile_clipped_features: set[str] = set()
+    profile_clipped_value_count = 0
+    train_stats = {
+        str(name): (float(train_mean[index]), float(train_std[index]))
+        for index, name in enumerate(feature_names)
+        if train_mean is not None and train_std is not None
+    }
+
+    def maybe_clip(feature: str, value: float) -> float:
+        nonlocal profile_clipped_value_count
+        clip_z = feature_clip_z(feature, feature_profile)
+        if clip_z is None or feature not in train_stats or value != value:
+            return value
+        mean, std = train_stats[feature]
+        if not np.isfinite(std) or std <= 0:
+            return value
+        clipped = float(np.clip(value, mean - clip_z * std, mean + clip_z * std))
+        profile_clipped_features.add(feature)
+        if clipped != value:
+            profile_clipped_value_count += 1
+        return clipped
 
     for _, group in df.groupby("session_id", sort=True):
         history: list[dict[str, float]] = []
         for _, row in group.sort_values("epoch_index").iterrows():
-            current_base = {name: base_value(row, name, feature_map) for name in feature_map}
+            current_base = {
+                name: maybe_clip(name, base_value(row, name, feature_map))
+                for name in feature_map
+            }
             out_row: list[float] = []
             for feature in feature_names:
                 if feature_disabled(feature, feature_profile):
@@ -245,9 +282,9 @@ def values_for_training_features(
                     out_row.append(float("nan"))
                     continue
 
-                direct = base_value(row, feature, feature_map)
+                direct = current_base.get(feature, base_value(row, feature, feature_map))
                 if direct == direct:
-                    out_row.append(direct)
+                    out_row.append(maybe_clip(feature, direct))
                     continue
 
                 delta_match = TEMPORAL_DELTA_RE.match(feature)
@@ -256,7 +293,7 @@ def values_for_training_features(
                 if delta_match is not None:
                     base = delta_match.group("base")
                     lag = int(delta_match.group("lag"))
-                    current = base_value(row, base, feature_map)
+                    current = current_base.get(base, base_value(row, base, feature_map))
                     if len(history) >= lag:
                         previous = history[-lag].get(base, float("nan"))
                         if current == current and previous == previous:
@@ -279,7 +316,7 @@ def values_for_training_features(
                         missing_base_features.add(base)
                 else:
                     missing_full_features.add(feature)
-                out_row.append(value)
+                out_row.append(maybe_clip(feature, value))
 
             history.append(current_base)
             values.append(out_row)
@@ -291,6 +328,9 @@ def values_for_training_features(
         "missing_full_features": sorted(missing_full_features),
         "profile_imputed_feature_count": len(profile_imputed_features),
         "profile_imputed_features": sorted(profile_imputed_features),
+        "profile_clipped_feature_count": len(profile_clipped_features),
+        "profile_clipped_features": sorted(profile_clipped_features),
+        "profile_clipped_value_count": profile_clipped_value_count,
     }
     return np.asarray(values, dtype=np.float32), report
 
@@ -330,6 +370,8 @@ def build_context_windows(
             temp_slope_source,
         ),
         feature_profile,
+        schema["mean"],
+        schema["std"],
     )
     mean = schema["mean"].reshape(1, -1)
     std = schema["std"].reshape(1, -1)
