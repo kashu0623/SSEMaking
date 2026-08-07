@@ -16,7 +16,6 @@ from typing import Any, Iterable, Sequence
 from .features import basic_stats, quality_features, temp_epoch_features
 
 
-RECORD_BYTES = 150
 MAGIC = 0x5AA5
 EPOCH_MS = 30_000
 ACC_RAW_SCALE = 256.0
@@ -38,6 +37,20 @@ PPG_TRANSFORMS = (
     "rolling-mean-30s",
     "highpass-lowpass-15s",
     "highpass-lowpass-30s",
+)
+
+
+@dataclass(frozen=True)
+class RawLayout:
+    name: str
+    record_bytes: int
+    magic_offset: int
+    has_app_ts: bool
+
+
+RAW_LAYOUTS = (
+    RawLayout("app_ts_v1", record_bytes=150, magic_offset=8, has_app_ts=True),
+    RawLayout("mcu_ts_legacy", record_bytes=142, magic_offset=0, has_app_ts=False),
 )
 
 IMU_AXES = ("acc_x", "acc_y", "acc_z", "gyro_x", "gyro_y", "gyro_z")
@@ -208,17 +221,47 @@ def read_raw_payload(path: Path) -> tuple[bytes, str]:
     return path.read_bytes(), path.name
 
 
-def parse_packet(payload: bytes, offset: int) -> PotchPacket:
-    app_ts_ms = struct.unpack_from("<Q", payload, offset)[0]
-    magic, seq, mcu_ts_ms, battery_raw, ntc_raw = struct.unpack_from("<HHIHH", payload, offset + 8)
+def detect_raw_layout(payload: bytes) -> RawLayout:
+    best_layout: RawLayout | None = None
+    best_score = -1.0
+    for layout in RAW_LAYOUTS:
+        parseable_bytes = len(payload) - (len(payload) % layout.record_bytes)
+        record_count = parseable_bytes // layout.record_bytes
+        if record_count <= 0:
+            continue
+        sample_count = min(record_count, 1000)
+        valid_count = 0
+        for index in range(sample_count):
+            offset = index * layout.record_bytes + layout.magic_offset
+            magic = struct.unpack_from("<H", payload, offset)[0]
+            valid_count += int(magic == MAGIC)
+        score = valid_count / sample_count
+        if score > best_score:
+            best_layout = layout
+            best_score = score
+    if best_layout is None or best_score < 0.5:
+        raise ValueError("Could not detect a supported Potch raw packet layout")
+    return best_layout
+
+
+def parse_packet(payload: bytes, offset: int, layout: RawLayout) -> PotchPacket:
+    header_offset = offset + layout.magic_offset
+    magic, seq, mcu_ts_ms, battery_raw, ntc_raw = struct.unpack_from("<HHIHH", payload, header_offset)
     if magic != MAGIC:
         raise ValueError(f"Bad Potch packet magic at offset {offset}: 0x{magic:04x}")
-    imu_values = struct.unpack_from("<" + "h" * 48, payload, offset + 20)
+    app_ts_ms = (
+        struct.unpack_from("<Q", payload, offset)[0]
+        if layout.has_app_ts
+        else int(mcu_ts_ms)
+    )
+    imu_offset = header_offset + 12
+    ppg_offset = header_offset + 108
+    imu_values = struct.unpack_from("<" + "h" * 48, payload, imu_offset)
     imu = tuple(
         tuple(int(value) for value in imu_values[index : index + 6])
         for index in range(0, len(imu_values), 6)
     )
-    ppg = tuple(int(value) for value in struct.unpack_from("<" + "H" * 16, payload, offset + 116))
+    ppg = tuple(int(value) for value in struct.unpack_from("<" + "H" * 16, payload, ppg_offset))
     return PotchPacket(
         app_ts_ms=int(app_ts_ms),
         seq=int(seq),
@@ -232,15 +275,18 @@ def parse_packet(payload: bytes, offset: int) -> PotchPacket:
 
 def parse_packets(path: Path) -> tuple[list[PotchPacket], dict[str, Any]]:
     payload, payload_name = read_raw_payload(path)
-    if len(payload) % RECORD_BYTES != 0:
+    layout = detect_raw_layout(payload)
+    trailing_bytes = len(payload) % layout.record_bytes
+    parseable_bytes = len(payload) - trailing_bytes
+    if parseable_bytes == 0:
         raise ValueError(
-            f"Raw payload length {len(payload)} is not divisible by {RECORD_BYTES}"
+            f"Raw payload length {len(payload)} contains no complete {layout.record_bytes}-byte records"
         )
     packets: list[PotchPacket] = []
     bad_records: list[dict[str, Any]] = []
-    for record_index, offset in enumerate(range(0, len(payload), RECORD_BYTES)):
+    for record_index, offset in enumerate(range(0, parseable_bytes, layout.record_bytes)):
         try:
-            packets.append(parse_packet(payload, offset))
+            packets.append(parse_packet(payload, offset, layout))
         except ValueError as error:
             bad_records.append(
                 {
@@ -256,8 +302,11 @@ def parse_packets(path: Path) -> tuple[list[PotchPacket], dict[str, Any]]:
         "source_path": str(path),
         "payload_name": payload_name,
         "payload_bytes": len(payload),
-        "record_bytes": RECORD_BYTES,
-        "record_count": len(payload) // RECORD_BYTES,
+        "layout": layout.name,
+        "parseable_payload_bytes": parseable_bytes,
+        "trailing_bytes": trailing_bytes,
+        "record_bytes": layout.record_bytes,
+        "record_count": parseable_bytes // layout.record_bytes,
         "packet_count": len(packets),
         "bad_record_count": len(bad_records),
         "bad_record_examples": bad_records[:20],
