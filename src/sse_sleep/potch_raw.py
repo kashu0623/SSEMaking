@@ -37,6 +37,9 @@ PPG_TRANSFORMS = (
     "rolling-mean-30s",
     "highpass-lowpass-15s",
     "highpass-lowpass-30s",
+    "bvp-like-8s",
+    "bvp-like-15s",
+    "bvp-like-30s",
 )
 
 
@@ -405,6 +408,43 @@ def seconds_from_transform(transform: str, default: float) -> float:
     return default
 
 
+def robust_spread(values: Sequence[float]) -> float:
+    finite = [float(value) for value in values if math.isfinite(float(value))]
+    if len(finite) < 2:
+        return 1.0
+    median = statistics.median(finite)
+    abs_deviations = [abs(value - median) for value in finite]
+    mad_sigma = 1.4826 * statistics.median(abs_deviations)
+    q25 = quantile(finite, 0.25)
+    q75 = quantile(finite, 0.75)
+    iqr_sigma = ((q75 - q25) / 1.349) if q25 is not None and q75 is not None and q75 > q25 else 0.0
+    std = statistics.pstdev(finite)
+    candidates = [value for value in (mad_sigma, iqr_sigma, std) if math.isfinite(value) and value > 0]
+    return max(candidates) if candidates else 1.0
+
+
+def bvp_like_ppg_transform(
+    raw_values: Sequence[float],
+    sample_rate_hz: float,
+    baseline_seconds: float,
+) -> list[float]:
+    if not raw_values:
+        return []
+    baseline_window = max(3, int(round(sample_rate_hz * baseline_seconds)))
+    lowpass_window = max(3, int(round(sample_rate_hz * 0.15)))
+    baseline = moving_average(raw_values, baseline_window)
+    detrended = [
+        float(value - base)
+        for value, base in zip(raw_values, baseline, strict=True)
+    ]
+    smoothed = moving_average(detrended, lowpass_window)
+    median = statistics.median(smoothed)
+    centered = [float(value - median) for value in smoothed]
+    scale = robust_spread(centered)
+    scaled = [value / scale for value in centered]
+    return [min(8.0, max(-8.0, value)) for value in scaled]
+
+
 def session_ppg_proxy(
     packets: Sequence[PotchPacket],
     transform: str,
@@ -423,12 +463,15 @@ def session_ppg_proxy(
         transformed = centered_ppg_proxy(raw_values, scale)
     else:
         baseline_seconds = seconds_from_transform(transform, 15.0)
-        baseline_window = max(3, int(round(sample_rate_hz * baseline_seconds)))
-        baseline = moving_average(raw_values, baseline_window)
-        transformed = [
-            (value - base) / scale
-            for value, base in zip(raw_values, baseline, strict=True)
-        ]
+        if transform.startswith("bvp-like"):
+            transformed = bvp_like_ppg_transform(raw_values, sample_rate_hz, baseline_seconds)
+        else:
+            baseline_window = max(3, int(round(sample_rate_hz * baseline_seconds)))
+            baseline = moving_average(raw_values, baseline_window)
+            transformed = [
+                (value - base) / scale
+                for value, base in zip(raw_values, baseline, strict=True)
+            ]
         if transform.startswith("highpass-lowpass"):
             lowpass_window = max(3, int(round(sample_rate_hz * 0.15)))
             transformed = moving_average(transformed, lowpass_window)
@@ -634,6 +677,7 @@ def epoch_row(
     packets: Sequence[PotchPacket],
     quality: QualityFilter,
     ppg_model_by_packet: dict[tuple[int, int], list[float]] | None = None,
+    ppg_peak_by_packet: dict[tuple[int, int], list[float]] | None = None,
     ppg_scale: float = PPG_AC_SCALE,
     temp_session_baseline: float | None = None,
 ) -> dict[str, Any]:
@@ -696,7 +740,11 @@ def epoch_row(
     for suffix, value in stats_for_raw(acc_vm_values, "acc_vm").items():
         row[f"acc_vm_{suffix}"] = value
     row["acc_vm_activity"] = activity(acc_vm_values)
-    ppg_peak_values: Sequence[int | float] = ppg_raw_values if ppg_model_by_packet is None else ppg_model_values
+    ppg_peak_values: Sequence[int | float] = (
+        ppg_raw_values
+        if ppg_peak_by_packet is None
+        else flatten_ppg_proxy(packets, ppg_peak_by_packet, ppg_scale)
+    )
     hr_values, ibi_values, hr_values_v2, ibi_values_v2, ppg_derived_report = ppg_derived_hr_ibi(
         ppg_peak_values,
         duration_ms,
@@ -725,6 +773,12 @@ def epoch_row(
     return row
 
 
+def ppg_peak_transform_for(ppg_transform: str) -> str:
+    if ppg_transform.startswith("bvp-like"):
+        return "rolling-mean-8s"
+    return ppg_transform
+
+
 def build_epoch_rows(
     packets: Sequence[PotchPacket],
     session_gap_ms: int,
@@ -735,6 +789,12 @@ def build_epoch_rows(
     rows: list[dict[str, Any]] = []
     for session_id, session in enumerate(split_sessions(packets, session_gap_ms)):
         ppg_model_by_packet = session_ppg_proxy(session, ppg_transform, ppg_scale)
+        ppg_peak_transform = ppg_peak_transform_for(ppg_transform)
+        ppg_peak_by_packet = (
+            ppg_model_by_packet
+            if ppg_peak_transform == ppg_transform
+            else session_ppg_proxy(session, ppg_peak_transform, ppg_scale)
+        )
         session_temp_values = [
             converted
             for packet in session
@@ -753,6 +813,7 @@ def build_epoch_rows(
                     epoch_packets,
                     quality,
                     ppg_model_by_packet=ppg_model_by_packet,
+                    ppg_peak_by_packet=ppg_peak_by_packet,
                     ppg_scale=ppg_scale,
                     temp_session_baseline=temp_session_baseline,
                 )
@@ -876,6 +937,7 @@ def build_potch_epoch_features(
         "clean_npz_written": clean_npz_written,
         "session_gap_ms": session_gap_ms,
         "ppg_transform": ppg_transform,
+        "ppg_peak_transform": ppg_peak_transform_for(ppg_transform),
         "ppg_scale": ppg_scale,
         "quality_filter": asdict(quality),
         "input_epoch_count": len(rows),
